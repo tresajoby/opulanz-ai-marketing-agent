@@ -10,9 +10,10 @@ alembic>=1.13.0
 pgvector>=0.3.0
 
 # ─── Validation and settings ─────────────────────────────────────────────────
-pydantic>=2.0.0
+pydantic[email]>=2.0.0
 pydantic-settings>=2.0.0
 python-dotenv>=1.0.0
+email-validator>=2.0.0
 
 # ─── Authentication ───────────────────────────────────────────────────────────
 python-jose[cryptography]>=3.3.0
