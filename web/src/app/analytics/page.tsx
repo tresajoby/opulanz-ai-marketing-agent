@@ -14,7 +14,7 @@ const STATUS_ORDER: ContentStatus[] = ["published", "approved", "pending_review"
 export default function AnalyticsPage() {
   const { data: allContent = [], isLoading } = useQuery({
     queryKey: ["content-all"],
-    queryFn: () => contentApi.list({ limit: 200 } as { limit: number }),
+    queryFn: () => contentApi.list(),
   });
 
   const byStatus = STATUS_ORDER.reduce<Record<string, number>>((acc, s) => {

@@ -12,12 +12,13 @@ import {
   BarChart3,
   LogOut,
   Zap,
+  MessageSquare,
 } from "lucide-react";
 
 const navItems = [
+  { href: "/chat",      label: "AI Chat Studio", icon: MessageSquare },
   { href: "/dashboard", label: "Command Center", icon: LayoutDashboard },
   { href: "/queue",     label: "Approval Queue", icon: ClipboardCheck },
-  { href: "/generate",  label: "Generate Content", icon: Sparkles },
   { href: "/brands",    label: "Brand Management", icon: Building2 },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
 ];
