@@ -52,7 +52,7 @@ class ComplianceAgent:
     MODEL = "claude-haiku-4-5-20251001"  # fast + cheap for bulk safety checks
 
     def __init__(self):
-        self._client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
     async def check(
         self,
@@ -170,7 +170,7 @@ class ComplianceAgent:
             "Return ONLY a number between 0.0 and 1.0. Nothing else."
         )
         try:
-            response = self._client.messages.create(
+            response = await self._client.messages.create(
                 model=self.MODEL,
                 max_tokens=10,
                 messages=[{"role": "user", "content": prompt}],

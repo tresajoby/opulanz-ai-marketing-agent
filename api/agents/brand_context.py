@@ -77,7 +77,7 @@ class BrandContextAgent:
     MODEL = "claude-sonnet-4-6"
 
     def __init__(self):
-        self._client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
     async def generate_social_post(
         self,
@@ -101,7 +101,7 @@ class BrandContextAgent:
         )
 
         try:
-            response = self._client.messages.create(
+            response = await self._client.messages.create(
                 model=self.MODEL,
                 max_tokens=2048,
                 system=system_prompt,
@@ -156,7 +156,7 @@ class BrandContextAgent:
         )
 
         try:
-            response = self._client.messages.create(
+            response = await self._client.messages.create(
                 model=self.MODEL,
                 max_tokens=2048,
                 system=system_prompt,
