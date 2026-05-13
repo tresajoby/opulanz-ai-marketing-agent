@@ -113,6 +113,11 @@ export interface ApprovalQueueItem {
 
 // ─── Generate ─────────────────────────────────────────────────────────────────
 
+export interface ConversationTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export interface GenerateRequest {
   brand_id: number;
   platform: Platform;
@@ -120,6 +125,7 @@ export interface GenerateRequest {
   additional_context?: string;
   num_variants?: number;
   content_type?: string;
+  conversation_history?: ConversationTurn[];
 }
 
 export interface GenerateResponse {

@@ -40,6 +40,7 @@ class GenerateRequest(BaseModel):
     additional_context: str = ""
     num_variants: int = 3
     content_type: str = "social_post"
+    conversation_history: list[dict] = []
 
 
 class ContentItemOut(BaseModel):
@@ -118,6 +119,7 @@ async def generate_content(
         goal=body.goal,
         additional_context=body.additional_context,
         num_variants=body.num_variants,
+        conversation_history=body.conversation_history or None,
     )
 
     if result.error:

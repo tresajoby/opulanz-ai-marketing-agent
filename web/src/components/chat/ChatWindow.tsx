@@ -1,14 +1,14 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { brandsApi, contentApi } from "@/lib/api";
 import { ServicesPanel } from "./ServicesPanel";
 import { TypingIndicator } from "./TypingIndicator";
 import { PostCard } from "./PostCard";
 import type { ChatMessage, UserMessage, ThinkingMessage, ContentMessage, SystemMessage } from "./types";
-import type { Platform, ApprovalQueueItem } from "@/types";
-import { Sparkles, Send, Bot, ChevronDown, AlertTriangle } from "lucide-react";
+import type { Platform, ApprovalQueueItem, ConversationTurn } from "@/types";
+import { Sparkles, Send, Bot, ChevronDown, AlertTriangle, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 let _msgId = 0;
@@ -23,6 +23,7 @@ function WelcomeScreen({ brandCount }: { brandCount: number }) {
       <h2 className="text-xl font-bold text-gray-900">OMMA — Your AI Marketing Manager</h2>
       <p className="text-gray-500 text-sm mt-2 max-w-sm leading-relaxed">
         Describe your campaign goal and I'll generate brand-aligned, compliance-checked posts ready for approval.
+        You can then refine them conversationally — just like talking to a colleague.
       </p>
       {brandCount === 0 && (
         <div className="mt-4 flex items-center gap-2 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2">
@@ -46,9 +47,22 @@ function WelcomeScreen({ brandCount }: { brandCount: number }) {
   );
 }
 
+function buildAssistantHistoryContent(items: ApprovalQueueItem[], platform: string): string {
+  if (items.length === 0) return "Content was generated and added to the approval queue.";
+  const lines = [`I generated ${items.length} variant(s) for ${platform}:`];
+  items.forEach((item, i) => {
+    const label = (item.content_item.generation_metadata?.variant_label as string) || `Variant ${i + 1}`;
+    lines.push(`\n${label}:\n${item.content_item.text_body}`);
+    if (item.content_item.hashtags) lines.push(item.content_item.hashtags);
+  });
+  return lines.join("\n");
+}
+
 export function ChatWindow() {
+  const qc = useQueryClient();
   const { data: brands = [] } = useQuery({ queryKey: ["brands"], queryFn: brandsApi.list });
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [conversationHistory, setConversationHistory] = useState<ConversationTurn[]>([]);
   const [input, setInput] = useState("");
   const [platform, setPlatform] = useState<Platform>("instagram");
   const [brandId, setBrandId] = useState<string>("");
@@ -57,19 +71,14 @@ export function ChatWindow() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-select first brand
   useEffect(() => {
-    if (brands.length > 0 && !brandId) {
-      setBrandId(String(brands[0].id));
-    }
+    if (brands.length > 0 && !brandId) setBrandId(String(brands[0].id));
   }, [brands, brandId]);
 
-  // Auto-scroll to bottom
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
 
-  // Auto-resize textarea
   function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     setInput(e.target.value);
     e.target.style.height = "auto";
@@ -83,6 +92,11 @@ export function ChatWindow() {
     }
   }
 
+  function handleClearConversation() {
+    setMessages([]);
+    setConversationHistory([]);
+  }
+
   const handleSend = useCallback(async () => {
     const text = input.trim();
     if (!text || !brandId || loading) return;
@@ -94,14 +108,18 @@ export function ChatWindow() {
       id: newId(), role: "user", text, platform,
       brandName: brand?.name ?? "Brand", timestamp: new Date(),
     };
-    const thinkingMsg: ThinkingMessage = {
-      id: thinkingId, role: "thinking", timestamp: new Date(),
-    };
+    const thinkingMsg: ThinkingMessage = { id: thinkingId, role: "thinking", timestamp: new Date() };
 
     setMessages((prev) => [...prev, userMsg, thinkingMsg]);
     setInput("");
-    if (textareaRef.current) { textareaRef.current.style.height = "auto"; }
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
     setLoading(true);
+
+    // Append user turn to history before sending
+    const updatedHistory: ConversationTurn[] = [
+      ...conversationHistory,
+      { role: "user", content: text },
+    ];
 
     try {
       const result = await contentApi.generate({
@@ -109,41 +127,42 @@ export function ChatWindow() {
         platform,
         goal: text,
         num_variants: variants,
+        conversation_history: updatedHistory,
       });
 
-      // Fetch the generated queue items using the returned IDs
       let items: ApprovalQueueItem[] = [];
       if (result.approval_queue_ids?.length > 0) {
         const allQueue = await contentApi.queue(Number(brandId));
         items = allQueue.filter((q) => result.approval_queue_ids.includes(q.id));
-        // Fallback: take the most recent N items if filter misses
-        if (items.length === 0) {
-          items = allQueue.slice(0, result.items_created);
-        }
+        if (items.length === 0) items = allQueue.slice(0, result.items_created);
       }
+
+      // Append assistant turn so next message has full context
+      const assistantContent = buildAssistantHistoryContent(items, platform);
+      setConversationHistory([
+        ...updatedHistory,
+        { role: "assistant", content: assistantContent },
+      ]);
 
       const contentMsg: ContentMessage = {
         id: newId(), role: "assistant", items, platform,
         warnings: result.compliance_warnings,
         timestamp: new Date(),
       };
+      setMessages((prev) => prev.map((m) => (m.id === thinkingId ? contentMsg : m)));
 
-      setMessages((prev) =>
-        prev.map((m) => m.id === thinkingId ? contentMsg : m)
-      );
+      // Keep queue in sync
+      qc.invalidateQueries({ queryKey: ["queue"] });
     } catch (err: unknown) {
+      const text = err instanceof Error ? err.message : "Something went wrong. Please try again.";
       const sysMsg: SystemMessage = {
-        id: newId(), role: "system",
-        text: err instanceof Error ? err.message : "Something went wrong. Please try again.",
-        variant: "error", timestamp: new Date(),
+        id: newId(), role: "system", text, variant: "error", timestamp: new Date(),
       };
-      setMessages((prev) =>
-        prev.map((m) => m.id === thinkingId ? sysMsg : m)
-      );
+      setMessages((prev) => prev.map((m) => (m.id === thinkingId ? sysMsg : m)));
     } finally {
       setLoading(false);
     }
-  }, [input, brandId, brands, platform, variants, loading]);
+  }, [input, brandId, brands, platform, variants, loading, conversationHistory, qc]);
 
   function injectTemplate(template: string) {
     setInput(template);
@@ -152,10 +171,11 @@ export function ChatWindow() {
 
   const brandOptions = brands.map((b) => ({ id: String(b.id), name: b.name }));
   const selectedBrand = brands.find((b) => String(b.id) === brandId);
+  const isRefinement = conversationHistory.length > 0;
 
   return (
     <div className="flex h-full gap-5">
-      {/* ── Chat area ─────────────────────────────────────────── */}
+      {/* ── Chat area ─────────────────────────────────────── */}
       <div className="flex flex-col flex-1 min-w-0 bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
 
         {/* Top bar */}
@@ -165,23 +185,38 @@ export function ChatWindow() {
               <Sparkles className="h-3.5 w-3.5 text-white" />
             </div>
             <span className="font-semibold text-gray-900 text-sm">Content Studio</span>
+            {isRefinement && (
+              <span className="text-[10px] font-medium text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-full px-2 py-0.5">
+                Conversation active
+              </span>
+            )}
           </div>
 
-          {/* Brand selector */}
-          <div className="relative">
-            <select
-              value={brandId}
-              onChange={(e) => setBrandId(e.target.value)}
-              className="appearance-none pl-3 pr-8 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
-            >
-              {brandOptions.length === 0 && (
-                <option value="">No brands — create one first</option>
-              )}
-              {brandOptions.map((b) => (
-                <option key={b.id} value={b.id}>{b.name}</option>
-              ))}
-            </select>
-            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400 pointer-events-none" />
+          <div className="flex items-center gap-2">
+            {isRefinement && (
+              <button
+                onClick={handleClearConversation}
+                className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800 px-2 py-1 rounded hover:bg-gray-200 transition-colors"
+                title="Start a new conversation"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                New chat
+              </button>
+            )}
+            {/* Brand selector */}
+            <div className="relative">
+              <select
+                value={brandId}
+                onChange={(e) => { setBrandId(e.target.value); handleClearConversation(); }}
+                className="appearance-none pl-3 pr-8 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+              >
+                {brandOptions.length === 0 && <option value="">No brands — create one first</option>}
+                {brandOptions.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400 pointer-events-none" />
+            </div>
           </div>
         </div>
 
@@ -191,7 +226,6 @@ export function ChatWindow() {
             <WelcomeScreen brandCount={brands.length} />
           ) : (
             messages.map((msg) => {
-              // User message
               if (msg.role === "user") {
                 const um = msg as UserMessage;
                 return (
@@ -210,7 +244,6 @@ export function ChatWindow() {
                 );
               }
 
-              // Thinking
               if (msg.role === "thinking") {
                 return (
                   <div key={msg.id} className="flex items-start gap-3">
@@ -224,7 +257,6 @@ export function ChatWindow() {
                 );
               }
 
-              // AI content
               if (msg.role === "assistant") {
                 const am = msg as ContentMessage;
                 return (
@@ -236,6 +268,8 @@ export function ChatWindow() {
                       <p className="text-xs text-gray-500 mt-1">
                         Generated {am.items.length} variant{am.items.length !== 1 ? "s" : ""} for{" "}
                         <span className="font-medium capitalize">{am.platform.replace("_", " ")}</span>
+                        {" · "}
+                        <span className="text-indigo-500">Reply to refine or start fresh with "New chat"</span>
                       </p>
                       {am.warnings.length > 0 && (
                         <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
@@ -263,7 +297,6 @@ export function ChatWindow() {
                 );
               }
 
-              // System message
               if (msg.role === "system") {
                 const sm = msg as SystemMessage;
                 const styles = {
@@ -285,6 +318,11 @@ export function ChatWindow() {
 
         {/* Input bar */}
         <div className="shrink-0 border-t border-gray-100 bg-white px-4 py-3">
+          {isRefinement && (
+            <p className="text-[10px] text-indigo-500 mb-2 px-1">
+              💬 You can refine — e.g. "Make them shorter", "Add more urgency", "Rewrite for a younger audience"
+            </p>
+          )}
           <div className="flex items-end gap-3 bg-gray-50 border border-gray-200 rounded-2xl px-4 py-3 focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100 transition-all">
             <textarea
               ref={textareaRef}
@@ -292,7 +330,11 @@ export function ChatWindow() {
               value={input}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
-              placeholder={`Describe your campaign goal for ${selectedBrand?.name ?? "your brand"}… (Enter to send, Shift+Enter for new line)`}
+              placeholder={
+                isRefinement
+                  ? `Refine the content above… (e.g. "make it shorter", "add a discount offer")`
+                  : `Describe your campaign goal for ${selectedBrand?.name ?? "your brand"}… (Enter to send)`
+              }
               disabled={loading || !brandId}
               className="flex-1 bg-transparent text-sm text-gray-800 placeholder-gray-400 resize-none focus:outline-none disabled:opacity-50 max-h-40 leading-relaxed"
             />
@@ -306,11 +348,7 @@ export function ChatWindow() {
                   : "bg-gray-200 text-gray-400 cursor-not-allowed"
               )}
             >
-              {loading ? (
-                <Sparkles className="h-4 w-4 animate-pulse" />
-              ) : (
-                <Send className="h-4 w-4" />
-              )}
+              {loading ? <Sparkles className="h-4 w-4 animate-pulse" /> : <Send className="h-4 w-4" />}
             </button>
           </div>
           <p className="text-[10px] text-gray-400 mt-1.5 text-center">
@@ -319,7 +357,7 @@ export function ChatWindow() {
         </div>
       </div>
 
-      {/* ── Services panel ────────────────────────────────────── */}
+      {/* ── Services panel ──────────────────────────────── */}
       <ServicesPanel
         activePlatform={platform}
         onPlatformChange={setPlatform}

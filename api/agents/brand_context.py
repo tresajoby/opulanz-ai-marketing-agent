@@ -87,6 +87,7 @@ class BrandContextAgent:
         goal: str,
         additional_context: str = "",
         num_variants: int = 3,
+        conversation_history: list[dict] | None = None,
     ) -> GenerationResult:
         """
         Generate brand-aligned social media post variants for the given platform.
@@ -101,11 +102,13 @@ class BrandContextAgent:
         )
 
         try:
+            messages: list[dict] = list(conversation_history) if conversation_history else []
+            messages.append({"role": "user", "content": user_prompt})
             response = await self._client.messages.create(
                 model=self.MODEL,
                 max_tokens=2048,
                 system=system_prompt,
-                messages=[{"role": "user", "content": user_prompt}],
+                messages=messages,
             )
             raw_text = response.content[0].text
             variants = self._parse_variants(raw_text, platform)

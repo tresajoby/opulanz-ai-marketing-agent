@@ -99,8 +99,7 @@ def publish_content_task(self, content_item_id: int):
 
     try:
         import asyncio
-        loop = asyncio.new_event_loop()
-        return loop.run_until_complete(_run())
+        return asyncio.run(_run())
     except Exception as exc:
         raise self.retry(exc=exc, countdown=2 ** self.request.retries * 60)
 
@@ -133,7 +132,7 @@ def expire_stale_approvals_task():
             await db.commit()
         await engine.dispose()
 
-    asyncio.new_event_loop().run_until_complete(_run())
+    asyncio.run(_run())
 
 
 @celery_app.task(name="api.tasks.celery_app.fetch_post_metrics_task")
