@@ -13,6 +13,7 @@ import re
 from dataclasses import dataclass, field
 
 import anthropic
+import openai
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -51,8 +52,11 @@ class ComplianceResult:
 class ComplianceAgent:
     MODEL = "claude-haiku-4-5-20251001"  # fast + cheap for bulk safety checks
 
+    FALLBACK_MODEL = "gpt-4o-mini"  # cheap for single-score compliance checks
+
     def __init__(self):
-        self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+        self._anthropic = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+        self._openai = openai.AsyncOpenAI(api_key=settings.openai_api_key)
 
     async def check(
         self,
@@ -170,15 +174,26 @@ class ComplianceAgent:
             "Return ONLY a number between 0.0 and 1.0. Nothing else."
         )
         try:
-            response = await self._client.messages.create(
+            response = await self._anthropic.messages.create(
                 model=self.MODEL,
                 max_tokens=10,
                 messages=[{"role": "user", "content": prompt}],
             )
             score_str = response.content[0].text.strip()
-            return max(0.0, min(1.0, float(score_str)))
         except Exception:
-            return 0.75  # fallback if LLM call fails
+            try:
+                response = await self._openai.chat.completions.create(
+                    model=self.FALLBACK_MODEL,
+                    max_tokens=10,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                score_str = (response.choices[0].message.content or "").strip()
+            except Exception:
+                return 0.75  # both providers failed
+        try:
+            return max(0.0, min(1.0, float(score_str)))
+        except ValueError:
+            return 0.75
 
 
 compliance_agent = ComplianceAgent()

@@ -10,6 +10,7 @@ import re
 from dataclasses import dataclass, field
 
 import anthropic
+import openai
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
@@ -75,9 +76,47 @@ class GenerationResult:
 
 class BrandContextAgent:
     MODEL = "claude-sonnet-4-6"
+    FALLBACK_MODEL = "gpt-4o"
 
     def __init__(self):
-        self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+        self._anthropic = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+        self._openai = openai.AsyncOpenAI(api_key=settings.openai_api_key)
+
+    async def _call_llm(
+        self,
+        system_prompt: str,
+        messages: list[dict],
+    ) -> tuple[str, int, int, str]:
+        """
+        Try Claude first; fall back to GPT-4o on any error.
+        Returns (raw_text, input_tokens, output_tokens, model_used).
+        """
+        try:
+            resp = await self._anthropic.messages.create(
+                model=self.MODEL,
+                max_tokens=2048,
+                system=system_prompt,
+                messages=messages,
+            )
+            return (
+                resp.content[0].text,
+                resp.usage.input_tokens,
+                resp.usage.output_tokens,
+                self.MODEL,
+            )
+        except Exception:
+            oai_messages = [{"role": "system", "content": system_prompt}] + messages
+            resp = await self._openai.chat.completions.create(
+                model=self.FALLBACK_MODEL,
+                max_tokens=2048,
+                messages=oai_messages,
+            )
+            return (
+                resp.choices[0].message.content or "",
+                resp.usage.prompt_tokens,
+                resp.usage.completion_tokens,
+                self.FALLBACK_MODEL,
+            )
 
     async def generate_social_post(
         self,
@@ -102,24 +141,18 @@ class BrandContextAgent:
         )
 
         try:
-            messages: list[dict] = list(conversation_history) if conversation_history else []
-            messages.append({"role": "user", "content": user_prompt})
-            response = await self._client.messages.create(
-                model=self.MODEL,
-                max_tokens=2048,
-                system=system_prompt,
-                messages=messages,
-            )
-            raw_text = response.content[0].text
+            msgs: list[dict] = list(conversation_history) if conversation_history else []
+            msgs.append({"role": "user", "content": user_prompt})
+            raw_text, in_tok, out_tok, model_used = await self._call_llm(system_prompt, msgs)
             variants = self._parse_variants(raw_text, platform)
 
             return GenerationResult(
                 variants=variants,
                 ai_confidence_score=self._estimate_confidence(variants, spec),
-                ai_model_used=self.MODEL,
+                ai_model_used=model_used,
                 generation_metadata={
-                    "input_tokens": response.usage.input_tokens,
-                    "output_tokens": response.usage.output_tokens,
+                    "input_tokens": in_tok,
+                    "output_tokens": out_tok,
                     "platform": platform.value,
                     "goal": goal,
                 },
@@ -159,22 +192,18 @@ class BrandContextAgent:
         )
 
         try:
-            response = await self._client.messages.create(
-                model=self.MODEL,
-                max_tokens=2048,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_prompt}],
+            raw, in_tok, out_tok, model_used = await self._call_llm(
+                system_prompt, [{"role": "user", "content": user_prompt}]
             )
-            raw = response.content[0].text
             variants = self._parse_ad_variants(raw)
 
             return GenerationResult(
                 variants=variants,
                 ai_confidence_score=0.85,
-                ai_model_used=self.MODEL,
+                ai_model_used=model_used,
                 generation_metadata={
-                    "input_tokens": response.usage.input_tokens,
-                    "output_tokens": response.usage.output_tokens,
+                    "input_tokens": in_tok,
+                    "output_tokens": out_tok,
                     "platform": platform.value,
                     "product": product_name,
                 },
