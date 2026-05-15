@@ -1,0 +1,37 @@
+# Frontend pipeline — builds Next.js app and deploys to Azure Static Web Apps
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - web/**
+      - azure-pipelines-frontend.yml
+
+variables:
+  nodeVersion: '20.x'
+
+stages:
+- stage: BuildAndDeploy
+  displayName: 'Build & Deploy Frontend'
+  jobs:
+  - job: Deploy
+    displayName: 'Deploy to Azure Static Web Apps'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: NodeTool@0
+      displayName: 'Use Node.js $(nodeVersion)'
+      inputs:
+        versionSpec: $(nodeVersion)
+
+    - task: AzureStaticWebApp@0
+      displayName: 'Build and deploy to Azure Static Web Apps'
+      inputs:
+        azure_static_web_apps_api_token: $(AZURE_STATIC_WEB_APPS_API_TOKEN)
+        app_location: 'web'
+        api_location: ''
+        output_location: ''
+        skip_app_build: false
+      env:
+        NEXT_PUBLIC_API_URL: $(NEXT_PUBLIC_API_URL)

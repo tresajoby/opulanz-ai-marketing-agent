@@ -31,8 +31,8 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://localhost:3001",
-        "https://opulanz-omma.vercel.app",
-        "https://*.vercel.app",
+        "https://*.azurestaticapps.net",
+        "https://*.azurewebsites.net",
     ],
     allow_credentials=True,
     allow_methods=["*"],

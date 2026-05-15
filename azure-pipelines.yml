@@ -1,0 +1,91 @@
+# Backend pipeline — builds Docker image, pushes to ACR, deploys to Azure Container Apps
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - api/**
+      - azure-pipelines.yml
+
+variables:
+  acrName: 'ommaacr'
+  acrLoginServer: '$(acrName).azurecr.io'
+  imageName: 'omma-api'
+  workerImageName: 'omma-worker'
+  containerAppName: 'omma-api'
+  workerContainerAppName: 'omma-worker'
+  resourceGroup: 'rg-omma-prod'
+  imageTag: '$(Build.BuildId)'
+
+stages:
+- stage: Build
+  displayName: 'Build & Push Docker Image'
+  jobs:
+  - job: BuildAndPush
+    displayName: 'Build API image'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: Docker@2
+      displayName: 'Build and push to ACR'
+      inputs:
+        command: buildAndPush
+        repository: $(imageName)
+        dockerfile: api/Dockerfile
+        buildContext: api/
+        containerRegistry: 'omma-acr-connection'
+        tags: |
+          $(imageTag)
+          latest
+
+- stage: Deploy
+  displayName: 'Deploy to Azure Container Apps'
+  dependsOn: Build
+  condition: succeeded()
+  jobs:
+  - deployment: DeployAPI
+    displayName: 'Update Container App'
+    pool:
+      vmImage: 'ubuntu-latest'
+    environment: 'production'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: AzureCLI@2
+            displayName: 'Deploy API container'
+            inputs:
+              azureSubscription: 'omma-azure-connection'
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                az containerapp update \
+                  --name $(containerAppName) \
+                  --resource-group $(resourceGroup) \
+                  --image $(acrLoginServer)/$(imageName):$(imageTag)
+
+          - task: AzureCLI@2
+            displayName: 'Deploy Celery worker container'
+            inputs:
+              azureSubscription: 'omma-azure-connection'
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                az containerapp update \
+                  --name $(workerContainerAppName) \
+                  --resource-group $(resourceGroup) \
+                  --image $(acrLoginServer)/$(imageName):$(imageTag)
+
+          - task: AzureCLI@2
+            displayName: 'Run Alembic migrations'
+            inputs:
+              azureSubscription: 'omma-azure-connection'
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                az containerapp job start \
+                  --name omma-migrate \
+                  --resource-group $(resourceGroup) \
+                  --image $(acrLoginServer)/$(imageName):$(imageTag) \
+                  --command "alembic upgrade head"
