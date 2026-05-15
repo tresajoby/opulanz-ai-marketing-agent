@@ -225,7 +225,7 @@ resource workerApp 'Microsoft.App/containerApps@2023-05-01' = {
 // ─── Azure Static Web Apps ────────────────────────────────────────────────────
 resource staticWebApp 'Microsoft.Web/staticSites@2023-01-01' = {
   name: swaName
-  location: 'eastus2'  // SWA has limited region support; eastus2 is widely available
+  location: 'westeurope'  // SWA has limited region support; westeurope is closest to francecentral
   sku: { name: 'Free', tier: 'Free' }
   properties: {
     repositoryUrl: 'https://github.com/tresajoby/opulanz-ai-marketing-agent'
