@@ -14,7 +14,7 @@
     "dbAdminPassword": {
       "reference": {
         "keyVault": {
-          "id": "/subscriptions/YOUR_SUBSCRIPTION_ID/resourceGroups/rg-omma-prod/providers/Microsoft.KeyVault/vaults/omma-kv"
+          "id": "/subscriptions/40a036d5-6362-4263-a3f8-52b5b1db0417/resourceGroups/rg-omma-prod/providers/Microsoft.KeyVault/vaults/omma-kv"
         },
         "secretName": "db-admin-password"
       }
@@ -22,7 +22,7 @@
     "secretKey": {
       "reference": {
         "keyVault": {
-          "id": "/subscriptions/YOUR_SUBSCRIPTION_ID/resourceGroups/rg-omma-prod/providers/Microsoft.KeyVault/vaults/omma-kv"
+          "id": "/subscriptions/40a036d5-6362-4263-a3f8-52b5b1db0417/resourceGroups/rg-omma-prod/providers/Microsoft.KeyVault/vaults/omma-kv"
         },
         "secretName": "jwt-secret-key"
       }
@@ -30,7 +30,7 @@
     "anthropicApiKey": {
       "reference": {
         "keyVault": {
-          "id": "/subscriptions/YOUR_SUBSCRIPTION_ID/resourceGroups/rg-omma-prod/providers/Microsoft.KeyVault/vaults/omma-kv"
+          "id": "/subscriptions/40a036d5-6362-4263-a3f8-52b5b1db0417/resourceGroups/rg-omma-prod/providers/Microsoft.KeyVault/vaults/omma-kv"
         },
         "secretName": "anthropic-api-key"
       }
@@ -38,7 +38,7 @@
     "openaiApiKey": {
       "reference": {
         "keyVault": {
-          "id": "/subscriptions/YOUR_SUBSCRIPTION_ID/resourceGroups/rg-omma-prod/providers/Microsoft.KeyVault/vaults/omma-kv"
+          "id": "/subscriptions/40a036d5-6362-4263-a3f8-52b5b1db0417/resourceGroups/rg-omma-prod/providers/Microsoft.KeyVault/vaults/omma-kv"
         },
         "secretName": "openai-api-key"
       }
