@@ -84,8 +84,10 @@ stages:
               scriptType: bash
               scriptLocation: inlineScript
               inlineScript: |
-                az containerapp job start \
+                az containerapp job update \
                   --name omma-migrate \
                   --resource-group $(resourceGroup) \
-                  --image $(acrLoginServer)/$(imageName):$(imageTag) \
-                  --command "alembic upgrade head"
+                  --image $(acrLoginServer)/$(imageName):$(imageTag)
+                az containerapp job start \
+                  --name omma-migrate \
+                  --resource-group $(resourceGroup)
