@@ -169,7 +169,8 @@ resource apiApp 'Microsoft.App/containerApps@2023-05-01' = {
       containers: [
         {
           name: 'omma-api'
-          image: '${acr.properties.loginServer}/omma-api:latest'
+          // Placeholder image for initial deploy; pipeline replaces this with the real ACR image
+          image: 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
           resources: { cpu: json('0.5'), memory: '1Gi' }
           env: sharedEnvVars
         }
@@ -208,7 +209,8 @@ resource workerApp 'Microsoft.App/containerApps@2023-05-01' = {
       containers: [
         {
           name: 'omma-worker'
-          image: '${acr.properties.loginServer}/omma-api:latest'
+          // Placeholder image for initial deploy; pipeline replaces this with the real ACR image
+          image: 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
           command: ['celery', '-A', 'tasks.celery_app:celery_app', 'worker', '--loglevel=info']
           resources: { cpu: json('0.5'), memory: '1Gi' }
           env: sharedEnvVars
