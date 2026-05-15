@@ -9,12 +9,12 @@ trigger:
       - azure-pipelines.yml
 
 variables:
-  acrName: 'ommaacr'
+  acrName: 'ommaacrprod'
   acrLoginServer: '$(acrName).azurecr.io'
   imageName: 'omma-api'
   workerImageName: 'omma-worker'
-  containerAppName: 'omma-api'
-  workerContainerAppName: 'omma-worker'
+  containerAppName: 'omma-prod-api'
+  workerContainerAppName: 'omma-prod-worker'
   resourceGroup: 'rg-omma-prod'
   imageTag: '$(Build.BuildId)'
 
