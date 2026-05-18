@@ -17,6 +17,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
@@ -224,6 +225,7 @@ async def get_approval_queue(
     """Returns all pending items in the approval queue the current user can act on."""
     stmt = (
         select(ApprovalQueue)
+        .options(selectinload(ApprovalQueue.content_item))
         .join(ContentItem)
         .where(ApprovalQueue.status == ApprovalStatus.pending)
     )
