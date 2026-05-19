@@ -75,6 +75,32 @@ export function ChatWindow() {
     if (brands.length > 0 && !brandId) setBrandId(String(brands[0].id));
   }, [brands, brandId]);
 
+  // Restore saved chat when brand changes
+  useEffect(() => {
+    if (!brandId) return;
+    try {
+      const saved = localStorage.getItem(`omma_chat_${brandId}`);
+      if (saved) {
+        const data = JSON.parse(saved);
+        setMessages((data.messages || []).map((m: ChatMessage) => ({ ...m, timestamp: new Date((m as any).timestamp) })));
+        setConversationHistory(data.conversationHistory || []);
+      } else {
+        setMessages([]);
+        setConversationHistory([]);
+      }
+    } catch { /* ignore */ }
+  }, [brandId]);
+
+  // Persist chat after each completed turn
+  useEffect(() => {
+    if (!brandId || loading) return;
+    const toSave = messages.filter((m) => m.role !== "thinking");
+    if (toSave.length === 0) { localStorage.removeItem(`omma_chat_${brandId}`); return; }
+    try {
+      localStorage.setItem(`omma_chat_${brandId}`, JSON.stringify({ messages: toSave, conversationHistory }));
+    } catch { /* ignore quota errors */ }
+  }, [messages, conversationHistory, brandId, loading]);
+
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
@@ -95,6 +121,7 @@ export function ChatWindow() {
   function handleClearConversation() {
     setMessages([]);
     setConversationHistory([]);
+    if (brandId) localStorage.removeItem(`omma_chat_${brandId}`);
   }
 
   const handleSend = useCallback(async () => {
