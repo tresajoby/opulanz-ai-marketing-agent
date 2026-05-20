@@ -210,12 +210,36 @@ function WebsiteFetchCard({
                 )}
                 {result.products_mentioned.length > 0 && (
                   <div>
-                    <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wide mb-1">Products / services</p>
+                    <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wide mb-1">
+                      Products / services <span className="normal-case font-normal text-emerald-600">({result.products_created} added)</span>
+                    </p>
                     <div className="flex flex-wrap gap-1.5">
                       {result.products_mentioned.map((p, i) => (
-                        <span key={i} className="bg-white border border-emerald-300 text-emerald-700 text-xs px-2 py-0.5 rounded-full">
-                          {p}
-                        </span>
+                        <span key={i} className="bg-white border border-emerald-300 text-emerald-700 text-xs px-2 py-0.5 rounded-full">{p}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {result.target_audiences.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wide mb-1">
+                      Target audiences <span className="normal-case font-normal text-emerald-600">({result.audiences_created} added)</span>
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {result.target_audiences.map((a, i) => (
+                        <span key={i} className="bg-white border border-blue-200 text-blue-700 text-xs px-2 py-0.5 rounded-full">{a}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {result.prohibited_terms.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wide mb-1">
+                      Prohibited terms <span className="normal-case font-normal text-emerald-600">({result.prohibited_terms_created} added)</span>
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {result.prohibited_terms.map((t, i) => (
+                        <span key={i} className="bg-white border border-red-200 text-red-600 text-xs px-2 py-0.5 rounded-full">{t}</span>
                       ))}
                     </div>
                   </div>

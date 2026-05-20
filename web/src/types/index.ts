@@ -41,6 +41,11 @@ export interface WebsiteFetchResult {
   tone_summary: string | null;
   key_messages: string[];
   products_mentioned: string[];
+  target_audiences: string[];
+  prohibited_terms: string[];
+  products_created: number;
+  audiences_created: number;
+  prohibited_terms_created: number;
   guidelines_chunks: number;
   message: string;
 }

@@ -50,6 +50,11 @@ class WebsiteFetchResult(BaseModel):
     tone_summary: str | None
     key_messages: list[str]
     products_mentioned: list[str]
+    target_audiences: list[str]
+    prohibited_terms: list[str]
+    products_created: int
+    audiences_created: int
+    prohibited_terms_created: int
     guidelines_chunks: int
     message: str
 
@@ -226,7 +231,10 @@ async def fetch_website(
         '  "tagline": one-sentence brand positioning (max 120 chars, or null),\n'
         '  "tone_summary": 2-3 sentences describing the brand\'s tone of voice,\n'
         '  "key_messages": array of up to 6 key marketing messages found on the page,\n'
-        '  "products_mentioned": array of product/service names mentioned,\n'
+        '  "products": array of objects {"name": str, "description": str} for each product/service,\n'
+        '  "target_audiences": array of objects {"name": str, "pain_points": str} for each audience segment,\n'
+        '  "prohibited_terms": array of words/phrases this brand should NEVER use '
+        "(competitor names, negative connotations, misleading claims),\n"
         '  "brand_guidelines_text": a paragraph (200-400 words) summarising brand voice, '
         "positioning, target audience signals, and unique selling points — "
         "written as brand guidelines for a copywriter.\n\n"
@@ -237,11 +245,10 @@ async def fetch_website(
     try:
         ai_resp = await client_ai.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=1024,
+            max_tokens=1500,
             messages=[{"role": "user", "content": analysis_prompt}],
         )
         raw_json = ai_resp.content[0].text.strip()
-        # Strip markdown fences if Claude adds them despite instructions
         raw_json = re.sub(r"^```(?:json)?\s*", "", raw_json)
         raw_json = re.sub(r"\s*```$", "", raw_json)
         analysis = json.loads(raw_json)
@@ -251,7 +258,9 @@ async def fetch_website(
     tagline = analysis.get("tagline") or None
     tone_summary = analysis.get("tone_summary") or None
     key_messages = analysis.get("key_messages") or []
-    products_mentioned = analysis.get("products_mentioned") or []
+    products_raw = analysis.get("products") or []
+    audiences_raw = analysis.get("target_audiences") or []
+    prohibited_raw = analysis.get("prohibited_terms") or []
     guidelines_text = analysis.get("brand_guidelines_text") or raw_page_text[:2000]
 
     # ── 4. Save website_url + optionally backfill tagline/tone ───────────────
@@ -260,15 +269,72 @@ async def fetch_website(
         brand.tagline = tagline[:500]
     if tone_summary and not brand.tone_of_voice:
         brand.tone_of_voice = tone_summary
+    await db.flush()
+
+    # ── 5. Create Product / TargetAudience / ProhibitedContent records ────────
+    products_created = 0
+    for p in products_raw:
+        name = (p.get("name", "") if isinstance(p, dict) else str(p)).strip()
+        if not name:
+            continue
+        exists = (await db.execute(
+            select(Product).where(Product.brand_id == brand_id, Product.name == name)
+        )).scalar_one_or_none()
+        if not exists:
+            desc = p.get("description") if isinstance(p, dict) else None
+            db.add(Product(brand_id=brand_id, name=name, description=desc))
+            products_created += 1
+
+    audiences_created = 0
+    for a in audiences_raw:
+        persona = (a.get("name", "") if isinstance(a, dict) else str(a)).strip()
+        if not persona:
+            continue
+        exists = (await db.execute(
+            select(TargetAudience).where(
+                TargetAudience.brand_id == brand_id,
+                TargetAudience.persona_name == persona,
+            )
+        )).scalar_one_or_none()
+        if not exists:
+            pain = a.get("pain_points") if isinstance(a, dict) else None
+            db.add(TargetAudience(brand_id=brand_id, persona_name=persona, pain_points=pain))
+            audiences_created += 1
+
+    prohibited_created = 0
+    for term in prohibited_raw:
+        term_str = str(term).strip()
+        if not term_str:
+            continue
+        exists = (await db.execute(
+            select(ProhibitedContent).where(
+                ProhibitedContent.brand_id == brand_id,
+                ProhibitedContent.content_value == term_str,
+            )
+        )).scalar_one_or_none()
+        if not exists:
+            db.add(ProhibitedContent(
+                brand_id=brand_id,
+                content_type="phrase",
+                content_value=term_str,
+                reason="Auto-detected from website",
+            ))
+            prohibited_created += 1
+
     await db.commit()
 
-    # ── 5. Ingest extracted text as brand guidelines ─────────────────────────
+    # ── 6. Ingest extracted text as brand guidelines ─────────────────────────
+    products_display = [p.get("name", "") if isinstance(p, dict) else str(p) for p in products_raw]
+    audiences_display = [a.get("name", "") if isinstance(a, dict) else str(a) for a in audiences_raw]
+
     full_guidelines = (
         f"SOURCE: {url}\n\n"
         f"BRAND TAGLINE: {tagline or 'N/A'}\n\n"
         f"TONE OF VOICE: {tone_summary or 'N/A'}\n\n"
         f"KEY MESSAGES:\n" + "\n".join(f"- {m}" for m in key_messages) + "\n\n"
-        f"PRODUCTS/SERVICES: {', '.join(products_mentioned) or 'N/A'}\n\n"
+        f"PRODUCTS/SERVICES: {', '.join(products_display) or 'N/A'}\n\n"
+        f"TARGET AUDIENCES: {', '.join(audiences_display) or 'N/A'}\n\n"
+        f"PROHIBITED TERMS: {', '.join(str(t) for t in prohibited_raw) or 'N/A'}\n\n"
         f"BRAND GUIDELINES SUMMARY:\n{guidelines_text}"
     )
     chunk_count = await rag_service.ingest_text(db, brand_id, full_guidelines, version=1)
@@ -278,11 +344,17 @@ async def fetch_website(
         tagline=tagline,
         tone_summary=tone_summary,
         key_messages=key_messages,
-        products_mentioned=products_mentioned,
+        products_mentioned=products_display,
+        target_audiences=audiences_display,
+        prohibited_terms=[str(t) for t in prohibited_raw],
+        products_created=products_created,
+        audiences_created=audiences_created,
+        prohibited_terms_created=prohibited_created,
         guidelines_chunks=chunk_count,
         message=(
-            f"Website analysed and ingested as {chunk_count} brand guideline chunk(s). "
-            "The AI now has full brand context from your website."
+            f"Website analysed: {chunk_count} guideline chunk(s) ingested, "
+            f"{products_created} product(s), {audiences_created} audience(s), "
+            f"{prohibited_created} prohibited term(s) added."
         ),
     )
 
