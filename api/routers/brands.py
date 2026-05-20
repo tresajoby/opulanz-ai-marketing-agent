@@ -110,7 +110,7 @@ async def create_brand(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.super_admin, UserRole.marketing_manager)),
 ):
-    brand = Brand(**body.model_dump())
+    brand = Brand(**body.model_dump(exclude_none=True))
     db.add(brand)
     await db.commit()
     await db.refresh(brand)

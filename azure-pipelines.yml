@@ -54,6 +54,52 @@ stages:
         deploy:
           steps:
           - task: AzureCLI@2
+            displayName: 'Run Alembic migrations (wait for completion)'
+            inputs:
+              azureSubscription: 'omma-azure-connection'
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                # Update migration job to the new image
+                az containerapp job update \
+                  --name omma-migrate \
+                  --resource-group $(resourceGroup) \
+                  --image $(acrLoginServer)/$(imageName):$(imageTag)
+
+                # Start migration and capture execution name
+                EXECUTION_NAME=$(az containerapp job start \
+                  --name omma-migrate \
+                  --resource-group $(resourceGroup) \
+                  --query "name" -o tsv)
+                echo "Migration execution started: $EXECUTION_NAME"
+
+                # Poll until succeeded or failed (timeout: 5 minutes)
+                ELAPSED=0
+                STATUS=""
+                while [ $ELAPSED -lt 300 ]; do
+                  STATUS=$(az containerapp job execution list \
+                    --name omma-migrate \
+                    --resource-group $(resourceGroup) \
+                    --query "[?name=='$EXECUTION_NAME'].properties.status | [0]" \
+                    -o tsv 2>/dev/null || true)
+                  echo "[$ELAPSED s] Migration status: ${STATUS:-Pending}"
+                  if [ "$STATUS" = "Succeeded" ]; then
+                    echo "Migration completed successfully."
+                    break
+                  elif [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Stopped" ]; then
+                    echo "ERROR: Migration failed with status '$STATUS'"
+                    exit 1
+                  fi
+                  sleep 10
+                  ELAPSED=$((ELAPSED + 10))
+                done
+
+                if [ "$STATUS" != "Succeeded" ]; then
+                  echo "ERROR: Migration timed out after 5 minutes"
+                  exit 1
+                fi
+
+          - task: AzureCLI@2
             displayName: 'Deploy API container'
             inputs:
               azureSubscription: 'omma-azure-connection'
@@ -76,18 +122,3 @@ stages:
                   --name $(workerContainerAppName) \
                   --resource-group $(resourceGroup) \
                   --image $(acrLoginServer)/$(imageName):$(imageTag)
-
-          - task: AzureCLI@2
-            displayName: 'Run Alembic migrations'
-            inputs:
-              azureSubscription: 'omma-azure-connection'
-              scriptType: bash
-              scriptLocation: inlineScript
-              inlineScript: |
-                az containerapp job update \
-                  --name omma-migrate \
-                  --resource-group $(resourceGroup) \
-                  --image $(acrLoginServer)/$(imageName):$(imageTag)
-                az containerapp job start \
-                  --name omma-migrate \
-                  --resource-group $(resourceGroup)
