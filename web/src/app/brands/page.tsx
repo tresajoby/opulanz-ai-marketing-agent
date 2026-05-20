@@ -9,8 +9,19 @@ import { Button } from "@/components/ui/Button";
 import { Input, Textarea } from "@/components/ui/Input";
 import { Alert } from "@/components/ui/Alert";
 import { brandsApi } from "@/lib/api";
-import { Building2, Plus, ArrowRight, CheckCircle } from "lucide-react";
+import { Building2, Plus, ArrowRight } from "lucide-react";
 import type { Brand } from "@/types";
+
+const TONE_PRESETS = [
+  "Professional & Authoritative",
+  "Friendly & Approachable",
+  "Playful & Fun",
+  "Inspirational & Motivational",
+  "Luxurious & Premium",
+  "Bold & Edgy",
+  "Calm & Reassuring",
+  "Witty & Clever",
+];
 
 export default function BrandsPage() {
   const qc = useQueryClient();
@@ -22,23 +33,26 @@ export default function BrandsPage() {
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
   const [tagline, setTagline] = useState("");
-  const [tone, setTone] = useState("");
+  const [toneOption, setToneOption] = useState("");
+  const [toneCustom, setToneCustom] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+
+  const toneValue = toneOption === "custom" ? toneCustom : toneOption;
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) { setError("Brand name is required."); return; }
     setSaving(true); setError(null);
     try {
-      await brandsApi.create({ name, tagline: tagline || null, tone_of_voice: tone || null });
+      await brandsApi.create({ name, tagline: tagline || null, tone_of_voice: toneValue || null });
       await qc.invalidateQueries({ queryKey: ["brands"] });
-      setName(""); setTagline(""); setTone("");
+      setName(""); setTagline(""); setToneOption(""); setToneCustom("");
       setShowForm(false); setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to create brand.");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to create brand.");
     } finally { setSaving(false); }
   }
 
@@ -79,13 +93,28 @@ export default function BrandsPage() {
                   value={tagline}
                   onChange={(e) => setTagline(e.target.value)}
                 />
-                <Textarea
-                  label="Tone of voice (optional)"
-                  placeholder="e.g. Professional yet approachable. Confident. Clear. Never pushy."
-                  value={tone}
-                  onChange={(e) => setTone(e.target.value)}
-                  rows={3}
-                />
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-gray-700">Tone of voice (optional)</label>
+                  <select
+                    value={toneOption}
+                    onChange={(e) => setToneOption(e.target.value)}
+                    className="block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  >
+                    <option value="">Select a tone…</option>
+                    {TONE_PRESETS.map((t) => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                    <option value="custom">Custom…</option>
+                  </select>
+                  {toneOption === "custom" && (
+                    <Textarea
+                      placeholder="e.g. Confident and direct, with a touch of warmth. Never salesy or corporate."
+                      value={toneCustom}
+                      onChange={(e) => setToneCustom(e.target.value)}
+                      rows={3}
+                    />
+                  )}
+                </div>
                 {error && <Alert variant="error">{error}</Alert>}
                 <div className="flex gap-2">
                   <Button type="submit" variant="primary" loading={saving}>Create Brand</Button>

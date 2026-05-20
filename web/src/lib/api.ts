@@ -24,10 +24,22 @@ async function request<T>(
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(`${BASE}${path}`, { ...options, headers });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      ...options,
+      headers,
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "TimeoutError") {
+      throw new Error("Request timed out — the server took too long to respond.");
+    }
+    throw new Error("Network error — check your connection and try again.");
+  }
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    const err = await res.json().catch(() => ({ detail: `${res.status} ${res.statusText}` }));
     throw new Error(err.detail ?? "Request failed");
   }
   if (res.status === 204) return undefined as T;
