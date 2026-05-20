@@ -30,8 +30,19 @@ export interface Brand {
   tagline: string | null;
   tone_of_voice: string | null;
   color_palette: Record<string, string> | null;
+  website_url: string | null;
   is_active: boolean;
   created_at: string;
+}
+
+export interface WebsiteFetchResult {
+  website_url: string;
+  tagline: string | null;
+  tone_summary: string | null;
+  key_messages: string[];
+  products_mentioned: string[];
+  guidelines_chunks: number;
+  message: string;
 }
 
 export interface Product {

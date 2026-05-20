@@ -9,7 +9,8 @@ import { Button } from "@/components/ui/Button";
 import { Input, Textarea } from "@/components/ui/Input";
 import { Alert } from "@/components/ui/Alert";
 import { brandsApi } from "@/lib/api";
-import { BookOpen, Package, Users, ShieldAlert, CheckCircle } from "lucide-react";
+import type { WebsiteFetchResult } from "@/types";
+import { BookOpen, Package, Users, ShieldAlert, Globe, Loader2, CheckCircle2, ChevronDown, ChevronUp } from "lucide-react";
 
 type Tab = "guidelines" | "products" | "audiences" | "prohibited";
 
@@ -17,6 +18,7 @@ export default function BrandDetailPage() {
   const { id } = useParams<{ id: string }>();
   const brandId = Number(id);
   const qc = useQueryClient();
+  const invalidateBrand = () => qc.invalidateQueries({ queryKey: ["brand", brandId] });
 
   const { data: brand } = useQuery({
     queryKey: ["brand", brandId],
@@ -53,6 +55,14 @@ export default function BrandDetailPage() {
   return (
     <DashboardLayout title={brand ? `${brand.name} — Configuration` : "Brand Configuration"}>
       <div className="max-w-2xl space-y-5">
+        {/* Website auto-fetch card */}
+        <WebsiteFetchCard
+          brandId={brandId}
+          currentUrl={brand?.website_url ?? null}
+          onFlash={flash}
+          onSuccess={invalidateBrand}
+        />
+
         {/* Tab bar */}
         <div className="flex gap-1 border-b border-gray-200 pb-0">
           {tabs.map(({ key, label, icon: Icon }) => (
@@ -96,6 +106,129 @@ export default function BrandDetailPage() {
     </DashboardLayout>
   );
 }
+
+// ─── Website Fetch Card ───────────────────────────────────────────────────────
+
+function WebsiteFetchCard({
+  brandId,
+  currentUrl,
+  onFlash,
+  onSuccess,
+}: {
+  brandId: number;
+  currentUrl: string | null;
+  onFlash: (t: "success" | "error", m: string) => void;
+  onSuccess: () => void;
+}) {
+  const [url, setUrl] = useState(currentUrl ?? "");
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<WebsiteFetchResult | null>(null);
+  const [expanded, setExpanded] = useState(false);
+
+  async function handleFetch(e: React.FormEvent) {
+    e.preventDefault();
+    if (!url.trim()) return;
+    setLoading(true);
+    setResult(null);
+    try {
+      const res = await brandsApi.fetchWebsite(brandId, url.trim());
+      setResult(res);
+      setExpanded(true);
+      onSuccess();
+      onFlash("success", res.message);
+    } catch (err: unknown) {
+      onFlash("error", err instanceof Error ? err.message : "Website fetch failed.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Globe className="h-4 w-4 text-indigo-600" />
+          <h3 className="font-semibold text-gray-900">Brand Website</h3>
+        </div>
+        <p className="text-xs text-gray-500 mt-1">
+          Enter your brand website URL. OMMA will scrape it, extract brand signals with AI,
+          and automatically ingest the results as brand guidelines.
+        </p>
+      </CardHeader>
+      <CardBody>
+        <form onSubmit={handleFetch} className="flex gap-2">
+          <div className="flex-1">
+            <Input
+              placeholder="https://yourbrand.com"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+            />
+          </div>
+          <Button type="submit" variant="primary" loading={loading} disabled={!url.trim()}>
+            {loading ? (
+              <><Loader2 className="h-4 w-4 animate-spin" /> Analysing…</>
+            ) : (
+              <><Globe className="h-4 w-4" /> Fetch & Analyse</>
+            )}
+          </Button>
+        </form>
+
+        {result && (
+          <div className="mt-4 border border-emerald-200 rounded-xl bg-emerald-50 overflow-hidden">
+            <button
+              onClick={() => setExpanded((v) => !v)}
+              className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-emerald-800 hover:bg-emerald-100 transition-colors"
+            >
+              <span className="flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                {result.guidelines_chunks} chunks ingested from {result.website_url}
+              </span>
+              {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            </button>
+
+            {expanded && (
+              <div className="px-4 pb-4 space-y-3 text-sm">
+                {result.tagline && (
+                  <div>
+                    <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wide mb-1">Tagline detected</p>
+                    <p className="text-gray-700 italic">"{result.tagline}"</p>
+                  </div>
+                )}
+                {result.tone_summary && (
+                  <div>
+                    <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wide mb-1">Tone of voice</p>
+                    <p className="text-gray-700">{result.tone_summary}</p>
+                  </div>
+                )}
+                {result.key_messages.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wide mb-1">Key messages</p>
+                    <ul className="list-disc list-inside space-y-0.5 text-gray-700">
+                      {result.key_messages.map((m, i) => <li key={i}>{m}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {result.products_mentioned.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wide mb-1">Products / services</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {result.products_mentioned.map((p, i) => (
+                        <span key={i} className="bg-white border border-emerald-300 text-emerald-700 text-xs px-2 py-0.5 rounded-full">
+                          {p}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
 
 // ─── Guidelines Tab ───────────────────────────────────────────────────────────
 

@@ -8,6 +8,7 @@ import type {
   GenerateResponse,
   Product,
   TargetAudience,
+  WebsiteFetchResult,
 } from "@/types";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "https://api-production-69d9.up.railway.app";
@@ -88,6 +89,11 @@ export const brandsApi = {
     request<Array<{ id: number; content_type: string; content_value: string; reason: string | null }>>(
       `/api/brands/${id}/prohibited`
     ),
+  fetchWebsite: (id: number, url: string) =>
+    request<WebsiteFetchResult>(`/api/brands/${id}/fetch-website`, {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    }),
 };
 
 // ─── Content & Approval ───────────────────────────────────────────────────────
