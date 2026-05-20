@@ -396,14 +396,26 @@ async def generate_image(
     if not item.image_prompt:
         raise HTTPException(status_code=400, detail="Content item has no image_prompt to generate from.")
 
-    client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
-    response = await client.images.generate(
-        model="dall-e-3",
-        prompt=item.image_prompt,
-        size="1024x1024",
-        quality="standard",
-        n=1,
-    )
+    if not settings.openai_api_key:
+        raise HTTPException(status_code=500, detail="OPENAI_API_KEY is not configured on the server.")
+
+    try:
+        client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
+        response = await client.images.generate(
+            model="dall-e-3",
+            prompt=item.image_prompt,
+            size="1024x1024",
+            quality="standard",
+            n=1,
+        )
+    except openai.AuthenticationError:
+        raise HTTPException(status_code=500, detail="OpenAI authentication failed — check OPENAI_API_KEY in server env vars.")
+    except openai.RateLimitError:
+        raise HTTPException(status_code=429, detail="OpenAI rate limit exceeded. Please try again later.")
+    except openai.BadRequestError as e:
+        raise HTTPException(status_code=400, detail=f"Image prompt was rejected by OpenAI: {e.message}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Image generation failed: {str(e)}")
 
     image_url = response.data[0].url
     item.image_url = image_url
