@@ -118,6 +118,65 @@ export function ChatWindow() {
     }
   }
 
+  const handleRevisionRequest = useCallback(async (notes: string, originalText: string, cardPlatform: string) => {
+    if (!brandId || loading) return;
+    const brand = brands.find((b) => String(b.id) === brandId);
+    const thinkingId = newId();
+
+    const userMsg: UserMessage = {
+      id: newId(), role: "user",
+      text: `Revise: ${notes}`,
+      platform: cardPlatform as Platform,
+      brandName: brand?.name ?? "Brand",
+      timestamp: new Date(),
+    };
+    const thinkingMsg: ThinkingMessage = { id: thinkingId, role: "thinking", timestamp: new Date() };
+    setMessages((prev) => [...prev, userMsg, thinkingMsg]);
+    setLoading(true);
+
+    const additionalContext = `Revise the following post based on these notes.\n\nOriginal post:\n${originalText}\n\nRevision notes: ${notes}`;
+    const updatedHistory: ConversationTurn[] = [
+      ...conversationHistory,
+      { role: "user", content: `Revise: ${notes}` },
+    ];
+
+    try {
+      const result = await contentApi.generate({
+        brand_id: Number(brandId),
+        platform: cardPlatform as Platform,
+        goal: notes,
+        additional_context: additionalContext,
+        num_variants: variants,
+        conversation_history: updatedHistory,
+      });
+
+      let items: ApprovalQueueItem[] = [];
+      if (result.approval_queue_ids?.length > 0) {
+        const allQueue = await contentApi.queue(Number(brandId));
+        items = allQueue.filter((q) => result.approval_queue_ids.includes(q.id));
+        if (items.length === 0) items = allQueue.slice(0, result.items_created);
+      }
+
+      const assistantContent = buildAssistantHistoryContent(items, cardPlatform);
+      setConversationHistory([...updatedHistory, { role: "assistant", content: assistantContent }]);
+
+      const contentMsg: ContentMessage = {
+        id: newId(), role: "assistant", items,
+        platform: cardPlatform as Platform,
+        warnings: result.compliance_warnings,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => prev.map((m) => (m.id === thinkingId ? contentMsg : m)));
+      qc.invalidateQueries({ queryKey: ["queue"] });
+    } catch (err: unknown) {
+      const errText = err instanceof Error ? err.message : "Something went wrong. Please try again.";
+      const sysMsg: SystemMessage = { id: newId(), role: "system", text: errText, variant: "error", timestamp: new Date() };
+      setMessages((prev) => prev.map((m) => (m.id === thinkingId ? sysMsg : m)));
+    } finally {
+      setLoading(false);
+    }
+  }, [brandId, brands, loading, conversationHistory, variants, qc]);
+
   function handleClearConversation() {
     setMessages([]);
     setConversationHistory([]);
@@ -316,7 +375,7 @@ export function ChatWindow() {
                       )}
                       <div className="grid gap-3 grid-cols-1">
                         {am.items.map((item) => (
-                          <PostCard key={item.id} item={item} />
+                          <PostCard key={item.id} item={item} onRevise={handleRevisionRequest} />
                         ))}
                       </div>
                     </div>

@@ -13,6 +13,7 @@ import type { ApprovalQueueItem } from "@/types";
 interface PostCardProps {
   item: ApprovalQueueItem;
   onAction?: () => void;
+  onRevise?: (notes: string, originalText: string, platform: string) => void;
 }
 
 function ScoreBar({ score }: { score: number | null }) {
@@ -37,7 +38,7 @@ const PLATFORM_COLORS: Record<string, string> = {
   google_ads: "bg-green-600",
 };
 
-export function PostCard({ item, onAction }: PostCardProps) {
+export function PostCard({ item, onAction, onRevise }: PostCardProps) {
   const { user } = useAuth();
   const ci = item.content_item;
   const canAct = user?.role === "super_admin" || user?.role === "marketing_manager";
@@ -89,7 +90,9 @@ export function PostCard({ item, onAction }: PostCardProps) {
     setLoading(true); setError(null);
     try {
       await contentApi.requestRevision(ci.id, comment);
-      setLocalStatus("revision_requested"); setMode("view"); setComment("");
+      setLocalStatus("revision_requested"); setMode("view");
+      onRevise?.(comment, ci.text_body, ci.platform);
+      setComment("");
       onAction?.();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed");
