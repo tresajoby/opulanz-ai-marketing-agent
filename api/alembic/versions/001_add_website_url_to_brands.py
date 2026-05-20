@@ -5,7 +5,6 @@ Revises:
 Create Date: 2026-05-20
 """
 from alembic import op
-import sqlalchemy as sa
 
 revision = "3f8a2c1d9e4b"
 down_revision = None
@@ -14,7 +13,8 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("brands", sa.Column("website_url", sa.String(500), nullable=True))
+    # IF NOT EXISTS guards against re-running on a DB that already has the column
+    op.execute("ALTER TABLE brands ADD COLUMN IF NOT EXISTS website_url VARCHAR(500)")
 
 
 def downgrade() -> None:

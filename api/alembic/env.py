@@ -1,4 +1,6 @@
 import asyncio
+import os
+import sys
 from logging.config import fileConfig
 
 from sqlalchemy import pool
@@ -7,14 +9,24 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 
-# Make sure all models are imported so Alembic sees them in Base.metadata
-import sys, os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Support both local-dev layout (parent/api/...) and Docker layout (/workspace/app/...)
+_app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _app_dir)
 
-from api.database import Base
-from api.models import user, brand, content  # noqa: F401
+try:
+    from api.database import Base          # local dev: parent dir on sys.path
+    from api.models import user, brand, content  # noqa: F401
+except ImportError:
+    from database import Base              # Docker: app files are directly in _app_dir
+    from models import user, brand, content  # noqa: F401  # type: ignore
 
 config = context.config
+
+# Always prefer DATABASE_URL env var over the placeholder in alembic.ini
+_db_url = os.environ.get("DATABASE_URL")
+if _db_url:
+    config.set_main_option("sqlalchemy.url", _db_url)
+
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 

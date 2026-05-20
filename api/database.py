@@ -36,3 +36,9 @@ async def init_db():
         # Import all models so Base.metadata knows about them
         from .models import user, brand, content  # noqa: F401
         await conn.run_sync(Base.metadata.create_all)
+        # create_all only creates missing tables, not missing columns on existing tables.
+        # These ALTER TABLE statements are idempotent and fill the gap until
+        # Alembic migrations have run.
+        await conn.execute(text(
+            "ALTER TABLE brands ADD COLUMN IF NOT EXISTS website_url VARCHAR(500)"
+        ))
