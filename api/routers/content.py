@@ -20,12 +20,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import openai
+
 from ..database import get_db
 from ..models.content import ContentItem, ApprovalQueue, AuditLog, Platform, ContentStatus, ApprovalStatus
 from ..models.user import User, UserRole
 from ..routers.auth import get_current_user, require_role
 from ..agents.brand_context import brand_context_agent, GenerationResult
 from ..agents.compliance_agent import compliance_agent
+from ..config import settings
 
 router = APIRouter()
 
@@ -375,6 +378,43 @@ async def publish_content(
         "task_id": task.id,
         "content_item_id": item_id,
     }
+
+
+# ─── Image generation ─────────────────────────────────────────────────────────
+
+@router.post("/{item_id}/generate-image", status_code=status.HTTP_200_OK)
+async def generate_image(
+    item_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role(
+        UserRole.super_admin, UserRole.marketing_manager, UserRole.content_creator
+    )),
+):
+    """Generate a DALL-E 3 image from the content item's image_prompt and save the URL."""
+    item = await _get_content_or_404(item_id, db)
+
+    if not item.image_prompt:
+        raise HTTPException(status_code=400, detail="Content item has no image_prompt to generate from.")
+
+    client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
+    response = await client.images.generate(
+        model="dall-e-3",
+        prompt=item.image_prompt,
+        size="1024x1024",
+        quality="standard",
+        n=1,
+    )
+
+    image_url = response.data[0].url
+    item.image_url = image_url
+    await db.commit()
+
+    await _write_audit(db, current_user.id, "content_generation", "image_generated", {
+        "content_item_id": item_id,
+        "image_url": image_url,
+    })
+
+    return {"image_url": image_url, "content_item_id": item_id}
 
 
 # ─── Internal helpers ─────────────────────────────────────────────────────────

@@ -263,11 +263,11 @@ async def fetch_website(
     prohibited_raw = analysis.get("prohibited_terms") or []
     guidelines_text = analysis.get("brand_guidelines_text") or raw_page_text[:2000]
 
-    # ── 4. Save website_url + optionally backfill tagline/tone ───────────────
+    # ── 4. Save website_url, tagline, and tone (always overwrite with fresh data) ──
     brand.website_url = url
-    if tagline and not brand.tagline:
+    if tagline:
         brand.tagline = tagline[:500]
-    if tone_summary and not brand.tone_of_voice:
+    if tone_summary:
         brand.tone_of_voice = tone_summary
     await db.flush()
 

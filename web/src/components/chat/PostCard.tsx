@@ -6,7 +6,7 @@ import { platformLabel, platformColor } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 import {
   Copy, CheckCircle, XCircle, RefreshCw, Rocket,
-  Hash, ImageIcon, Bot, Check,
+  Hash, ImageIcon, Bot, Check, Loader2, Sparkles,
 } from "lucide-react";
 import type { ApprovalQueueItem } from "@/types";
 
@@ -50,6 +50,9 @@ export function PostCard({ item, onAction, onRevise }: PostCardProps) {
   const [copied, setCopied] = useState(false);
   const [published, setPublished] = useState(false);
   const [localStatus, setLocalStatus] = useState(item.status);
+  const [imageUrl, setImageUrl] = useState<string | null>(ci.image_url ?? null);
+  const [imageLoading, setImageLoading] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
 
   const confidence = ci.ai_confidence_score ?? null;
   const compliance = ci.generation_metadata?.compliance_score as number | null ?? null;
@@ -99,6 +102,16 @@ export function PostCard({ item, onAction, onRevise }: PostCardProps) {
     } finally { setLoading(false); }
   }
 
+  async function handleGenerateImage() {
+    setImageLoading(true); setImageError(null);
+    try {
+      const res = await contentApi.generateImage(ci.id);
+      setImageUrl(res.image_url);
+    } catch (e: unknown) {
+      setImageError(e instanceof Error ? e.message : "Image generation failed");
+    } finally { setImageLoading(false); }
+  }
+
   async function handlePublish() {
     setLoading(true); setError(null);
     try {
@@ -140,9 +153,32 @@ export function PostCard({ item, onAction, onRevise }: PostCardProps) {
         )}
 
         {ci.image_prompt && (
-          <div className="mt-3 bg-violet-50 rounded-lg px-3 py-2 flex items-start gap-2">
-            <ImageIcon className="h-3.5 w-3.5 text-violet-500 mt-0.5 shrink-0" />
-            <p className="text-xs text-violet-700 italic">{ci.image_prompt}</p>
+          <div className="mt-3 space-y-2">
+            <div className="bg-violet-50 rounded-lg px-3 py-2 flex items-start gap-2">
+              <ImageIcon className="h-3.5 w-3.5 text-violet-500 mt-0.5 shrink-0" />
+              <p className="text-xs text-violet-700 italic">{ci.image_prompt}</p>
+            </div>
+            {imageUrl ? (
+              <img
+                src={imageUrl}
+                alt="AI-generated"
+                className="w-full rounded-lg border border-gray-200 object-cover"
+              />
+            ) : (
+              <div>
+                <button
+                  onClick={handleGenerateImage}
+                  disabled={imageLoading}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700 disabled:opacity-50 transition-colors"
+                >
+                  {imageLoading
+                    ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Generating…</>
+                    : <><Sparkles className="h-3.5 w-3.5" /> Generate Image</>
+                  }
+                </button>
+                {imageError && <p className="mt-1 text-xs text-red-600">{imageError}</p>}
+              </div>
+            )}
           </div>
         )}
       </div>

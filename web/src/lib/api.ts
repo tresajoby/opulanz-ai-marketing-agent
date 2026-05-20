@@ -15,7 +15,8 @@ const BASE = process.env.NEXT_PUBLIC_API_URL ?? "https://api-production-69d9.up.
 
 async function request<T>(
   path: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
+  timeoutMs = 30_000,
 ): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -29,7 +30,7 @@ async function request<T>(
     res = await fetch(`${BASE}${path}`, {
       ...options,
       headers,
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (err) {
     if (err instanceof DOMException && err.name === "TimeoutError") {
@@ -146,4 +147,10 @@ export const contentApi = {
     }),
   publish: (id: number) =>
     request(`/api/content/${id}/publish`, { method: "POST" }),
+  generateImage: (id: number) =>
+    request<{ image_url: string; content_item_id: number }>(
+      `/api/content/${id}/generate-image`,
+      { method: "POST" },
+      60_000,
+    ),
 };
