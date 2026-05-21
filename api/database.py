@@ -42,3 +42,6 @@ async def init_db():
         await conn.execute(text(
             "ALTER TABLE brands ADD COLUMN IF NOT EXISTS website_url VARCHAR(500)"
         ))
+        await conn.execute(text(
+            "ALTER TABLE content_items ALTER COLUMN image_url TYPE TEXT"
+        ))

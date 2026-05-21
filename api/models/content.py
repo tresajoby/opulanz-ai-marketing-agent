@@ -42,7 +42,7 @@ class ContentItem(Base):
     text_body: Mapped[str] = mapped_column(Text, nullable=False)
     hashtags: Mapped[str | None] = mapped_column(Text, nullable=True)
     image_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
-    image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Status and metadata
     status: Mapped[ContentStatus] = mapped_column(

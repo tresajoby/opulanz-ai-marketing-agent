@@ -416,7 +416,13 @@ async def generate_image(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Image generation failed: {str(e)}")
 
-    image_url = response.data[0].url
+    img = response.data[0]
+    if img.url:
+        image_url = img.url
+    elif img.b64_json:
+        image_url = f"data:image/png;base64,{img.b64_json}"
+    else:
+        raise HTTPException(status_code=500, detail="OpenAI returned no image data.")
     item.image_url = image_url
     await db.commit()
 
