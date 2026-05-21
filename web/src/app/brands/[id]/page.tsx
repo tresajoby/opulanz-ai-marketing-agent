@@ -10,9 +10,11 @@ import { Input, Textarea } from "@/components/ui/Input";
 import { Alert } from "@/components/ui/Alert";
 import { brandsApi } from "@/lib/api";
 import type { WebsiteFetchResult } from "@/types";
-import { BookOpen, Package, Users, ShieldAlert, Globe, Loader2, CheckCircle2, ChevronDown, ChevronUp } from "lucide-react";
+import { BookOpen, Package, Users, ShieldAlert, Globe, Loader2, CheckCircle2, ChevronDown, ChevronUp, Link2, Link2Off } from "lucide-react";
+import { socialApi } from "@/lib/api";
+import type { SocialAccount } from "@/types";
 
-type Tab = "guidelines" | "products" | "audiences" | "prohibited";
+type Tab = "guidelines" | "products" | "audiences" | "prohibited" | "social";
 
 export default function BrandDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -45,11 +47,17 @@ export default function BrandDetailPage() {
     setTimeout(() => setMsg(null), 4000);
   }
 
+  const { data: socialAccounts = [], refetch: refetchSocial } = useQuery({
+    queryKey: ["social", brandId],
+    queryFn: () => socialApi.listAccounts(brandId),
+  });
+
   const tabs: { key: Tab; label: string; icon: React.ElementType }[] = [
     { key: "guidelines", label: "Brand Guidelines", icon: BookOpen },
     { key: "products",   label: "Products",         icon: Package },
     { key: "audiences",  label: "Audiences",        icon: Users },
     { key: "prohibited", label: "Prohibited Content",icon: ShieldAlert },
+    { key: "social",     label: "Connected Accounts", icon: Link2 },
   ];
 
   return (
@@ -102,8 +110,160 @@ export default function BrandDetailPage() {
         {tab === "prohibited" && (
           <ProhibitedTab brandId={brandId} prohibited={prohibited} onFlash={flash} refetch={refetchProhibited} />
         )}
+
+        {/* Social accounts tab */}
+        {tab === "social" && (
+          <SocialAccountsTab brandId={brandId} accounts={socialAccounts} onFlash={flash} refetch={refetchSocial} />
+        )}
       </div>
     </DashboardLayout>
+  );
+}
+
+// ─── Social Accounts Tab ──────────────────────────────────────────────────────
+
+const SOCIAL_PLATFORMS: {
+  key: string;
+  label: string;
+  color: string;
+  textColor: string;
+  abbr: string;
+}[] = [
+  { key: "instagram", label: "Instagram",  color: "from-purple-500 to-pink-500", textColor: "text-white", abbr: "IG" },
+  { key: "facebook",  label: "Facebook",   color: "bg-blue-600",                 textColor: "text-white", abbr: "FB" },
+  { key: "linkedin",  label: "LinkedIn",   color: "bg-blue-700",                 textColor: "text-white", abbr: "in" },
+  { key: "tiktok",    label: "TikTok",     color: "bg-gray-900",                 textColor: "text-white", abbr: "TT" },
+];
+
+function SocialAccountsTab({
+  brandId,
+  accounts,
+  onFlash,
+  refetch,
+}: {
+  brandId: number;
+  accounts: SocialAccount[];
+  onFlash: (t: "success" | "error", m: string) => void;
+  refetch: () => void;
+}) {
+  const [disconnecting, setDisconnecting] = useState<number | null>(null);
+
+  function handleConnect(platform: string) {
+    const url = socialApi.getConnectUrl(platform, brandId);
+    const popup = window.open(url, "oauth_popup", "width=620,height=720,scrollbars=yes,resizable=yes");
+
+    function onMessage(event: MessageEvent) {
+      if (event.data?.type === "oauth_success") {
+        window.removeEventListener("message", onMessage);
+        popup?.close();
+        refetch();
+        onFlash("success", `${event.data.platform} connected as ${event.data.account}.`);
+      } else if (event.data?.type === "oauth_error") {
+        window.removeEventListener("message", onMessage);
+        onFlash("error", event.data.message ?? "OAuth failed.");
+      }
+    }
+    window.addEventListener("message", onMessage);
+  }
+
+  async function handleDisconnect(acct: SocialAccount) {
+    setDisconnecting(acct.id);
+    try {
+      await socialApi.disconnect(acct.id);
+      refetch();
+      onFlash("success", `${acct.account_name} disconnected.`);
+    } catch (e: unknown) {
+      onFlash("error", e instanceof Error ? e.message : "Failed to disconnect.");
+    } finally {
+      setDisconnecting(null);
+    }
+  }
+
+  const connectedByPlatform = Object.fromEntries(
+    accounts.map((a) => [a.platform, a])
+  );
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Link2 className="h-4 w-4 text-indigo-600" />
+          <h3 className="font-semibold text-gray-900">Connected Social Accounts</h3>
+        </div>
+        <p className="text-xs text-gray-500 mt-1">
+          Connect each platform so OMMA can publish approved content directly.
+          Only connected platforms will appear in the Content Studio.
+        </p>
+      </CardHeader>
+      <CardBody>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {SOCIAL_PLATFORMS.map((plat) => {
+            const acct = connectedByPlatform[plat.key];
+            const isConnected = !!acct;
+            const isGradient = plat.color.startsWith("from-");
+
+            return (
+              <div
+                key={plat.key}
+                className={`rounded-xl border p-4 flex items-center gap-3 ${
+                  isConnected ? "border-emerald-200 bg-emerald-50" : "border-gray-200 bg-gray-50"
+                }`}
+              >
+                {/* Platform avatar */}
+                <div
+                  className={`h-10 w-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${
+                    isConnected
+                      ? isGradient
+                        ? `bg-gradient-to-br ${plat.color} ${plat.textColor}`
+                        : `${plat.color} ${plat.textColor}`
+                      : "bg-gray-200 text-gray-500"
+                  }`}
+                >
+                  {isConnected && acct.avatar_url ? (
+                    <img src={acct.avatar_url} alt={acct.account_name} className="h-10 w-10 rounded-full object-cover" />
+                  ) : (
+                    plat.abbr
+                  )}
+                </div>
+
+                {/* Info */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-900">{plat.label}</p>
+                  {isConnected ? (
+                    <p className="text-xs text-emerald-700 truncate">{acct.account_name}</p>
+                  ) : (
+                    <p className="text-xs text-gray-400">Not connected</p>
+                  )}
+                </div>
+
+                {/* Action */}
+                {isConnected ? (
+                  <button
+                    onClick={() => handleDisconnect(acct)}
+                    disabled={disconnecting === acct.id}
+                    className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-50 disabled:opacity-50 transition-colors shrink-0"
+                  >
+                    {disconnecting === acct.id
+                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      : <Link2Off className="h-3.5 w-3.5" />
+                    }
+                    Disconnect
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleConnect(plat.key)}
+                    className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 px-2 py-1 rounded hover:bg-indigo-50 transition-colors shrink-0 font-medium"
+                  >
+                    <Link2 className="h-3.5 w-3.5" />
+                    Connect
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </CardBody>
+    </Card>
   );
 }
 

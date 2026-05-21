@@ -9,6 +9,7 @@ import type {
   Product,
   TargetAudience,
   WebsiteFetchResult,
+  SocialAccount,
 } from "@/types";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "https://api-production-69d9.up.railway.app";
@@ -153,4 +154,17 @@ export const contentApi = {
       { method: "POST" },
       60_000,
     ),
+};
+
+// ─── Social OAuth ─────────────────────────────────────────────────────────────
+
+export const socialApi = {
+  listAccounts: (brandId: number) =>
+    request<SocialAccount[]>(`/api/social/brands/${brandId}/accounts`),
+  disconnect: (accountId: number) =>
+    request(`/api/social/accounts/${accountId}`, { method: "DELETE" }),
+  getConnectUrl: (platform: string, brandId: number): string => {
+    const token = getToken();
+    return `${BASE}/api/social/connect/${platform}?brand_id=${brandId}&token=${token ?? ""}`;
+  },
 };

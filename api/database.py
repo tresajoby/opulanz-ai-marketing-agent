@@ -34,7 +34,7 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         # Import all models so Base.metadata knows about them
-        from .models import user, brand, content  # noqa: F401
+        from .models import user, brand, content, social  # noqa: F401
         await conn.run_sync(Base.metadata.create_all)
         # create_all only creates missing tables, not missing columns on existing tables.
         # These ALTER TABLE statements are idempotent and fill the gap until
@@ -45,3 +45,21 @@ async def init_db():
         await conn.execute(text(
             "ALTER TABLE content_items ALTER COLUMN image_url TYPE TEXT"
         ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS social_accounts (
+                id SERIAL PRIMARY KEY,
+                brand_id INTEGER NOT NULL REFERENCES brands(id) ON DELETE CASCADE,
+                platform VARCHAR(50) NOT NULL,
+                account_id VARCHAR(255) NOT NULL,
+                account_name VARCHAR(255) NOT NULL,
+                avatar_url VARCHAR(500),
+                access_token TEXT NOT NULL,
+                refresh_token TEXT,
+                token_expires_at TIMESTAMP,
+                scopes VARCHAR(500),
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                connected_at TIMESTAMP NOT NULL,
+                updated_at TIMESTAMP NOT NULL,
+                CONSTRAINT uq_social_brand_platform_account UNIQUE (brand_id, platform, account_id)
+            )
+        """))

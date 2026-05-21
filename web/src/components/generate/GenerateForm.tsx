@@ -6,18 +6,23 @@ import { Button } from "@/components/ui/Button";
 import { Input, Textarea } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Alert } from "@/components/ui/Alert";
-import { contentApi, brandsApi } from "@/lib/api";
+import { contentApi, brandsApi, socialApi } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
-import { Sparkles, CheckCircle } from "lucide-react";
+import { Sparkles, CheckCircle, AlertCircle } from "lucide-react";
 import type { Platform, GenerateResponse } from "@/types";
 
-const PLATFORM_OPTIONS = [
-  { value: "instagram",    label: "Instagram" },
-  { value: "facebook",     label: "Facebook" },
-  { value: "tiktok",       label: "TikTok" },
+// Ad platforms don't require OAuth — always available
+const AD_PLATFORMS = [
   { value: "facebook_ads", label: "Facebook Ads" },
   { value: "google_ads",   label: "Google Ads" },
 ];
+
+const ORGANIC_PLATFORM_LABELS: Record<string, string> = {
+  instagram: "Instagram",
+  facebook:  "Facebook",
+  tiktok:    "TikTok",
+  linkedin:  "LinkedIn",
+};
 
 const VARIANT_OPTIONS = [
   { value: "1", label: "1 variant" },
@@ -33,6 +38,32 @@ export function GenerateForm() {
 
   const [brandId, setBrandId] = useState("");
   const [platform, setPlatform] = useState<Platform>("instagram");
+
+  const { data: socialAccounts = [] } = useQuery({
+    queryKey: ["social", brandId],
+    queryFn: () => socialApi.listAccounts(Number(brandId)),
+    enabled: !!brandId,
+  });
+
+  const connectedPlatforms = socialAccounts.map((a) => a.platform);
+  const hasConnectedOrganic = connectedPlatforms.length > 0;
+
+  // When a brand is selected, filter to connected organic platforms + always-on ad platforms.
+  // When no brand is selected yet, show all platforms so the dropdown isn't empty.
+  const platformOptions = brandId
+    ? [
+        ...connectedPlatforms.map((p) => ({
+          value: p,
+          label: `${ORGANIC_PLATFORM_LABELS[p] ?? p} ✓`,
+        })),
+        ...AD_PLATFORMS,
+      ]
+    : [
+        { value: "instagram", label: "Instagram" },
+        { value: "facebook",  label: "Facebook" },
+        { value: "tiktok",    label: "TikTok" },
+        ...AD_PLATFORMS,
+      ];
   const [goal, setGoal] = useState("");
   const [context, setContext] = useState("");
   const [variants, setVariants] = useState("3");
@@ -87,10 +118,17 @@ export function GenerateForm() {
 
           <Select
             label="Platform"
-            options={PLATFORM_OPTIONS}
+            options={platformOptions}
             value={platform}
             onChange={(e) => setPlatform(e.target.value as Platform)}
           />
+          {brandId && !hasConnectedOrganic && (
+            <p className="flex items-center gap-1.5 text-xs text-amber-600 -mt-3">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              No social accounts connected for this brand. Only ad platforms are available.{" "}
+              <a href={`/brands/${brandId}`} className="underline hover:text-amber-800">Connect accounts →</a>
+            </p>
+          )}
 
           <Input
             label="Campaign goal"

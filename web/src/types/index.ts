@@ -127,6 +127,23 @@ export interface ApprovalQueueItem {
   content_item: ContentItem;
 }
 
+// ─── Social accounts ──────────────────────────────────────────────────────────
+
+export type SocialPlatform = "facebook" | "instagram" | "linkedin" | "tiktok";
+
+export interface SocialAccount {
+  id: number;
+  brand_id: number;
+  platform: SocialPlatform;
+  account_id: string;
+  account_name: string;
+  avatar_url: string | null;
+  scopes: string | null;
+  is_active: boolean;
+  connected_at: string;
+  token_expires_at: string | null;
+}
+
 // ─── Generate ─────────────────────────────────────────────────────────────────
 
 export interface ConversationTurn {

@@ -24,6 +24,17 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     dalle_model: str = "gpt-image-1"  # current OpenAI image model; override with DALLE_MODEL env var
 
+    # Social media OAuth — set these in Azure Container App env vars
+    meta_app_id: str = ""
+    meta_app_secret: str = ""
+    linkedin_client_id: str = ""
+    linkedin_client_secret: str = ""
+    tiktok_client_key: str = ""
+    tiktok_client_secret: str = ""
+
+    # Encryption key for stored OAuth tokens — generate with: python -c "import secrets; print(secrets.token_hex(32))"
+    oauth_encryption_key: str = "change-this-in-production-32bytes"
+
     # Embeddings (local sentence-transformers model)
     embedding_model: str = "all-MiniLM-L6-v2"
     embedding_dimensions: int = 384
