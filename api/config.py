@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     # AI
     anthropic_api_key: str = ""
     openai_api_key: str = ""
+    dalle_model: str = "dall-e-2"  # switch to "dall-e-3" once billing is enabled on the OpenAI account
 
     # Embeddings (local sentence-transformers model)
     embedding_model: str = "all-MiniLM-L6-v2"

@@ -402,10 +402,9 @@ async def generate_image(
     try:
         client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
         response = await client.images.generate(
-            model="dall-e-3",
+            model=settings.dalle_model,
             prompt=item.image_prompt,
             size="1024x1024",
-            quality="standard",
             n=1,
         )
     except openai.AuthenticationError:
