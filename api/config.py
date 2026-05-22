@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     dalle_model: str = "gpt-image-1"  # current OpenAI image model; override with DALLE_MODEL env var
 
+    # Public-facing API base URL — used to build OAuth callback URIs
+    # Set this in Azure: API_BASE_URL=https://omma-prod-api.orangetree-ce90bec0.francecentral.azurecontainerapps.io
+    api_base_url: str = ""
+
     # Social media OAuth — set these in Azure Container App env vars
     meta_app_id: str = ""
     meta_app_secret: str = ""

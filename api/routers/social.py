@@ -118,6 +118,15 @@ def _verify_state(state: str) -> tuple[int, str]:
 
 # ─── HTML helpers ─────────────────────────────────────────────────────────────
 
+def _api_base(request: Request) -> str:
+    """Return the public-facing API base URL, preferring the configured setting over request headers."""
+    if settings.api_base_url:
+        return settings.api_base_url.rstrip("/")
+    # Fall back to X-Forwarded-Proto so Azure's TLS termination doesn't downgrade to http
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    return f"{scheme}://{request.url.netloc}"
+
+
 def _popup_success(platform: str, account_name: str) -> HTMLResponse:
     safe_name = account_name.replace("'", "\\'")
     return HTMLResponse(f"""<!DOCTYPE html><html><head><title>Connected</title></head><body>
@@ -171,8 +180,7 @@ async def get_connect_token(
             detail=f"OAuth credentials for {platform} are not configured on the server.",
         )
     state = _create_state(brand_id, platform)
-    base = f"{request.url.scheme}://{request.url.netloc}"
-    connect_url = f"{base}/api/social/connect/{platform}?brand_id={brand_id}&state={state}"
+    connect_url = f"{_api_base(request)}/api/social/connect/{platform}?brand_id={brand_id}&state={state}"
     return ConnectTokenOut(connect_url=connect_url)
 
 
@@ -203,7 +211,7 @@ async def connect_platform(
 
     # Regenerate a fresh state for the OAuth provider (same data, new timestamp)
     state = _create_state(brand_id, platform)
-    callback = f"{request.url.scheme}://{request.url.netloc}/api/social/callback/{platform}"
+    callback = f"{_api_base(request)}/api/social/callback/{platform}"
     cfg = PLATFORM_CONFIG[platform]
 
     if platform == "tiktok":
@@ -243,7 +251,7 @@ async def oauth_callback(
 
     client_id = _platform_client_id(platform)
     client_secret = _platform_client_secret(platform)
-    callback = f"{request.url.scheme}://{request.url.netloc}/api/social/callback/{platform}"
+    callback = f"{_api_base(request)}/api/social/callback/{platform}"
 
     async with httpx.AsyncClient(timeout=15) as http:
         # ── Exchange code for access token ────────────────────────────────────
