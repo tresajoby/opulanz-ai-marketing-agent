@@ -236,11 +236,20 @@ async def connect_platform(
 async def oauth_callback(
     platform: str,
     request: Request,
-    code: str = Query(...),
-    state: str = Query(...),
+    code: str = Query(None),
+    state: str = Query(None),
+    error: str = Query(None),
+    error_description: str = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     """Handle the provider redirect, exchange code for tokens, save to DB."""
+    if error:
+        return _popup_error(error_description or error)
+    if not code:
+        return _popup_error("No authorization code received from platform.")
+    if not state:
+        return _popup_error("Missing OAuth state parameter.")
+
     brand_id, verified_platform = _verify_state(state)
     if verified_platform != platform:
         return _popup_error("Platform mismatch in OAuth state.")
