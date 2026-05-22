@@ -145,6 +145,37 @@ def _popup_error(msg: str) -> HTMLResponse:
 </body></html>""", status_code=400)
 
 
+# ─── Connect token (called by frontend with Authorization header) ─────────────
+
+class ConnectTokenOut(BaseModel):
+    connect_url: str
+
+
+@router.get("/connect-token", response_model=ConnectTokenOut)
+async def get_connect_token(
+    platform: str = Query(...),
+    brand_id: int = Query(...),
+    request: Request = None,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Return a signed, short-lived connect URL for the popup.
+    Called by the frontend via normal fetch (Authorization header works here).
+    The state token embedded in the URL doubles as both authentication and CSRF protection.
+    """
+    if platform not in PLATFORM_CONFIG:
+        raise HTTPException(status_code=400, detail=f"Unsupported platform: {platform}")
+    if not _platform_client_id(platform):
+        raise HTTPException(
+            status_code=500,
+            detail=f"OAuth credentials for {platform} are not configured on the server.",
+        )
+    state = _create_state(brand_id, platform)
+    base = f"{request.url.scheme}://{request.url.netloc}"
+    connect_url = f"{base}/api/social/connect/{platform}?brand_id={brand_id}&state={state}"
+    return ConnectTokenOut(connect_url=connect_url)
+
+
 # ─── Connect ──────────────────────────────────────────────────────────────────
 
 @router.get("/connect/{platform}")
@@ -152,26 +183,25 @@ async def connect_platform(
     platform: str,
     request: Request,
     brand_id: int = Query(...),
-    token: str = Query(...),    # JWT from frontend (browser popup can't set headers)
+    state: str = Query(...),    # HMAC-signed state from /connect-token — proves authenticated origin
 ):
     """Redirect the browser popup to the platform's OAuth consent screen."""
     if platform not in PLATFORM_CONFIG:
         raise HTTPException(status_code=400, detail=f"Unsupported platform: {platform}")
 
+    # Verify state proves this URL was issued by /connect-token to an authenticated user
+    state_brand_id, state_platform = _verify_state(state)
+    if state_brand_id != brand_id or state_platform != platform:
+        raise HTTPException(status_code=400, detail="State mismatch.")
+
     client_id = _platform_client_id(platform)
     if not client_id:
         raise HTTPException(
             status_code=500,
-            detail=f"OAuth credentials for {platform} are not configured on the server."
+            detail=f"OAuth credentials for {platform} are not configured on the server.",
         )
 
-    # Verify JWT (query param — browser popup can't set Authorization header)
-    from jose import jwt, JWTError
-    try:
-        jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid authentication token.")
-
+    # Regenerate a fresh state for the OAuth provider (same data, new timestamp)
     state = _create_state(brand_id, platform)
     callback = f"{request.url.scheme}://{request.url.netloc}/api/social/callback/{platform}"
     cfg = PLATFORM_CONFIG[platform]

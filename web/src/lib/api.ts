@@ -163,8 +163,8 @@ export const socialApi = {
     request<SocialAccount[]>(`/api/social/brands/${brandId}/accounts`),
   disconnect: (accountId: number) =>
     request(`/api/social/accounts/${accountId}`, { method: "DELETE" }),
-  getConnectUrl: (platform: string, brandId: number): string => {
-    const token = getToken();
-    return `${BASE}/api/social/connect/${platform}?brand_id=${brandId}&token=${token ?? ""}`;
-  },
+  getConnectUrl: (platform: string, brandId: number) =>
+    request<{ connect_url: string }>(
+      `/api/social/connect-token?platform=${platform}&brand_id=${brandId}`
+    ),
 };

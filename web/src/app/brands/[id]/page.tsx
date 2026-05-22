@@ -148,9 +148,17 @@ function SocialAccountsTab({
 }) {
   const [disconnecting, setDisconnecting] = useState<number | null>(null);
 
-  function handleConnect(platform: string) {
-    const url = socialApi.getConnectUrl(platform, brandId);
-    const popup = window.open(url, "oauth_popup", "width=620,height=720,scrollbars=yes,resizable=yes");
+  async function handleConnect(platform: string) {
+    let connectUrl: string;
+    try {
+      const res = await socialApi.getConnectUrl(platform, brandId);
+      connectUrl = res.connect_url;
+    } catch (e: unknown) {
+      onFlash("error", e instanceof Error ? e.message : "Could not initiate OAuth.");
+      return;
+    }
+
+    const popup = window.open(connectUrl, "oauth_popup", "width=620,height=720,scrollbars=yes,resizable=yes");
 
     function onMessage(event: MessageEvent) {
       if (event.data?.type === "oauth_success") {
