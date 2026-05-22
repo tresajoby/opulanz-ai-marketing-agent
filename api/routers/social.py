@@ -46,7 +46,7 @@ PLATFORM_CONFIG: dict[str, dict] = {
     "linkedin": {
         "auth_url": "https://www.linkedin.com/oauth/v2/authorization",
         "token_url": "https://www.linkedin.com/oauth/v2/accessToken",
-        "scopes": "w_member_social,r_liteprofile",
+        "scopes": "openid,profile,email,w_member_social",
     },
     "tiktok": {
         "auth_url": "https://www.tiktok.com/v2/auth/authorize/",
@@ -378,19 +378,12 @@ async def _fetch_account_info(
 
     elif platform == "linkedin":
         r = await http.get(
-            "https://api.linkedin.com/v2/me",
+            "https://api.linkedin.com/v2/userinfo",
             headers={"Authorization": f"Bearer {access_token}"},
-            params={"projection": "(id,localizedFirstName,localizedLastName,profilePicture(displayImage~:playableStreams))"},
         )
         d = r.json()
-        name = f"{d.get('localizedFirstName','')} {d.get('localizedLastName','')}".strip()
-        avatar = None
-        try:
-            elements = d["profilePicture"]["displayImage~"]["elements"]
-            avatar = elements[-1]["identifiers"][0]["identifier"]
-        except (KeyError, IndexError):
-            pass
-        return d["id"], name or "LinkedIn Member", avatar
+        name = d.get("name") or f"{d.get('given_name','')} {d.get('family_name','')}".strip()
+        return d["sub"], name or "LinkedIn Member", d.get("picture")
 
     elif platform == "tiktok":
         r = await http.get(
