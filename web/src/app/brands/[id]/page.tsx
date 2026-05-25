@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
@@ -120,19 +120,13 @@ export default function BrandDetailPage() {
   );
 }
 
-// ─── Social Accounts Tab ──────────────────────────────────────────────────────
+// ─── Social Accounts Tab (n8n-managed) ───────────────────────────────────────
 
-const SOCIAL_PLATFORMS: {
-  key: string;
-  label: string;
-  color: string;
-  textColor: string;
-  abbr: string;
-}[] = [
-  { key: "instagram", label: "Instagram",  color: "from-purple-500 to-pink-500", textColor: "text-white", abbr: "IG" },
-  { key: "facebook",  label: "Facebook",   color: "bg-blue-600",                 textColor: "text-white", abbr: "FB" },
-  { key: "linkedin",  label: "LinkedIn",   color: "bg-blue-700",                 textColor: "text-white", abbr: "in" },
-  { key: "tiktok",    label: "TikTok",     color: "bg-gray-900",                 textColor: "text-white", abbr: "TT" },
+const SOCIAL_PLATFORMS: { key: string; label: string; color: string; textColor: string; abbr: string }[] = [
+  { key: "instagram", label: "Instagram", color: "from-purple-500 to-pink-500", textColor: "text-white", abbr: "IG" },
+  { key: "facebook",  label: "Facebook",  color: "bg-blue-600",                 textColor: "text-white", abbr: "FB" },
+  { key: "linkedin",  label: "LinkedIn",  color: "bg-blue-700",                 textColor: "text-white", abbr: "in" },
+  { key: "tiktok",    label: "TikTok",    color: "bg-gray-900",                 textColor: "text-white", abbr: "TT" },
 ];
 
 function SocialAccountsTab({
@@ -146,36 +140,29 @@ function SocialAccountsTab({
   onFlash: (t: "success" | "error", m: string) => void;
   refetch: () => void;
 }) {
-  const [disconnecting, setDisconnecting] = useState<number | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [n8nUrl, setN8nUrl] = useState<string | null>(null);
 
-  async function handleConnect(platform: string) {
-    let connectUrl: string;
+  // Fetch n8n URL on mount
+  useEffect(() => {
+    socialApi.getN8nUrl().then((r) => setN8nUrl(r.url)).catch(() => {});
+  }, []);
+
+  async function handleMarkConnected(platform: string) {
+    setBusy(platform);
     try {
-      const res = await socialApi.getConnectUrl(platform, brandId);
-      connectUrl = res.connect_url;
+      await socialApi.markConnected(brandId, platform, platform.charAt(0).toUpperCase() + platform.slice(1));
+      refetch();
+      onFlash("success", `${platform.charAt(0).toUpperCase() + platform.slice(1)} marked as connected.`);
     } catch (e: unknown) {
-      onFlash("error", e instanceof Error ? e.message : "Could not initiate OAuth.");
-      return;
+      onFlash("error", e instanceof Error ? e.message : "Failed to mark as connected.");
+    } finally {
+      setBusy(null);
     }
-
-    const popup = window.open(connectUrl, "oauth_popup", "width=620,height=720,scrollbars=yes,resizable=yes");
-
-    function onMessage(event: MessageEvent) {
-      if (event.data?.type === "oauth_success") {
-        window.removeEventListener("message", onMessage);
-        popup?.close();
-        refetch();
-        onFlash("success", `${event.data.platform} connected as ${event.data.account}.`);
-      } else if (event.data?.type === "oauth_error") {
-        window.removeEventListener("message", onMessage);
-        onFlash("error", event.data.message ?? "OAuth failed.");
-      }
-    }
-    window.addEventListener("message", onMessage);
   }
 
   async function handleDisconnect(acct: SocialAccount) {
-    setDisconnecting(acct.id);
+    setBusy(`disconnect-${acct.id}`);
     try {
       await socialApi.disconnect(acct.id);
       refetch();
@@ -183,24 +170,34 @@ function SocialAccountsTab({
     } catch (e: unknown) {
       onFlash("error", e instanceof Error ? e.message : "Failed to disconnect.");
     } finally {
-      setDisconnecting(null);
+      setBusy(null);
     }
   }
 
-  const connectedByPlatform = Object.fromEntries(
-    accounts.map((a) => [a.platform, a])
-  );
+  const connectedByPlatform = Object.fromEntries(accounts.map((a) => [a.platform, a]));
 
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center gap-2">
-          <Link2 className="h-4 w-4 text-indigo-600" />
-          <h3 className="font-semibold text-gray-900">Connected Social Accounts</h3>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Link2 className="h-4 w-4 text-indigo-600" />
+            <h3 className="font-semibold text-gray-900">Connected Social Accounts</h3>
+          </div>
+          {n8nUrl && (
+            <a
+              href={n8nUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-800 px-3 py-1.5 rounded-lg border border-indigo-200 hover:bg-indigo-50 transition-colors"
+            >
+              <Link2 className="h-3.5 w-3.5" />
+              Open n8n Dashboard
+            </a>
+          )}
         </div>
         <p className="text-xs text-gray-500 mt-1">
-          Connect each platform so OMMA can publish approved content directly.
-          Only connected platforms will appear in the Content Studio.
+          Connect accounts in n8n, then mark them as connected here so OMMA knows which platforms to publish to.
         </p>
       </CardHeader>
       <CardBody>
@@ -209,6 +206,7 @@ function SocialAccountsTab({
             const acct = connectedByPlatform[plat.key];
             const isConnected = !!acct;
             const isGradient = plat.color.startsWith("from-");
+            const isBusy = busy === plat.key || busy === `disconnect-${acct?.id}`;
 
             return (
               <div
@@ -217,53 +215,39 @@ function SocialAccountsTab({
                   isConnected ? "border-emerald-200 bg-emerald-50" : "border-gray-200 bg-gray-50"
                 }`}
               >
-                {/* Platform avatar */}
-                <div
-                  className={`h-10 w-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${
-                    isConnected
-                      ? isGradient
-                        ? `bg-gradient-to-br ${plat.color} ${plat.textColor}`
-                        : `${plat.color} ${plat.textColor}`
-                      : "bg-gray-200 text-gray-500"
-                  }`}
-                >
-                  {isConnected && acct.avatar_url ? (
-                    <img src={acct.avatar_url} alt={acct.account_name} className="h-10 w-10 rounded-full object-cover" />
-                  ) : (
-                    plat.abbr
-                  )}
+                <div className={`h-10 w-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${
+                  isConnected
+                    ? isGradient ? `bg-gradient-to-br ${plat.color} ${plat.textColor}` : `${plat.color} ${plat.textColor}`
+                    : "bg-gray-200 text-gray-500"
+                }`}>
+                  {plat.abbr}
                 </div>
 
-                {/* Info */}
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-900">{plat.label}</p>
-                  {isConnected ? (
-                    <p className="text-xs text-emerald-700 truncate">{acct.account_name}</p>
-                  ) : (
-                    <p className="text-xs text-gray-400">Not connected</p>
-                  )}
+                  {isConnected
+                    ? <p className="text-xs text-emerald-700 truncate">{acct.account_name}</p>
+                    : <p className="text-xs text-gray-400">Not connected</p>
+                  }
                 </div>
 
-                {/* Action */}
                 {isConnected ? (
                   <button
                     onClick={() => handleDisconnect(acct)}
-                    disabled={disconnecting === acct.id}
+                    disabled={isBusy}
                     className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-50 disabled:opacity-50 transition-colors shrink-0"
                   >
-                    {disconnecting === acct.id
-                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      : <Link2Off className="h-3.5 w-3.5" />
-                    }
+                    {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Link2Off className="h-3.5 w-3.5" />}
                     Disconnect
                   </button>
                 ) : (
                   <button
-                    onClick={() => handleConnect(plat.key)}
-                    className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 px-2 py-1 rounded hover:bg-indigo-50 transition-colors shrink-0 font-medium"
+                    onClick={() => handleMarkConnected(plat.key)}
+                    disabled={isBusy}
+                    className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 px-2 py-1 rounded hover:bg-indigo-50 disabled:opacity-50 transition-colors shrink-0 font-medium"
                   >
-                    <Link2 className="h-3.5 w-3.5" />
-                    Connect
+                    {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Link2 className="h-3.5 w-3.5" />}
+                    Mark connected
                   </button>
                 )}
               </div>

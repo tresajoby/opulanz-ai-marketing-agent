@@ -156,15 +156,18 @@ export const contentApi = {
     ),
 };
 
-// ─── Social OAuth ─────────────────────────────────────────────────────────────
+// ─── Social (n8n-managed) ─────────────────────────────────────────────────────
 
 export const socialApi = {
   listAccounts: (brandId: number) =>
     request<SocialAccount[]>(`/api/social/brands/${brandId}/accounts`),
+  markConnected: (brandId: number, platform: string, accountName: string) =>
+    request<SocialAccount>(`/api/social/brands/${brandId}/accounts`, {
+      method: "POST",
+      body: JSON.stringify({ platform, account_name: accountName }),
+    }),
   disconnect: (accountId: number) =>
     request(`/api/social/accounts/${accountId}`, { method: "DELETE" }),
-  getConnectUrl: (platform: string, brandId: number) =>
-    request<{ connect_url: string }>(
-      `/api/social/connect-token?platform=${platform}&brand_id=${brandId}`
-    ),
+  getN8nUrl: () =>
+    request<{ url: string }>("/api/social/n8n-url"),
 };

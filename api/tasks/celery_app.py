@@ -83,7 +83,7 @@ def publish_content_task(self, content_item_id: int):
 
             post_id = None
             try:
-                post_id = await _publish_to_platform(db, item)
+                post_id = await _publish_to_platform(item)
             except Exception as exc:
                 print(f"[OMMA] Platform publish error ({platform}): {exc}")
 
@@ -104,123 +104,32 @@ def publish_content_task(self, content_item_id: int):
 
 # ─── Platform publish helper ─────────────────────────────────────────────────
 
-async def _publish_to_platform(db, item) -> str | None:
-    """Post to the social platform using the brand's stored OAuth token."""
+async def _publish_to_platform(item) -> str | None:
+    """Trigger the n8n 'Publish Content' webhook to post to the social platform."""
     import httpx
-    from sqlalchemy import select
-    from ..models.social import SocialAccount
-    from ..routers.social import decrypt_token
 
-    platform = item.platform.value
-    result = await db.execute(
-        select(SocialAccount).where(
-            SocialAccount.brand_id == item.brand_id,
-            SocialAccount.platform == platform,
-            SocialAccount.is_active == True,
-        ).limit(1)
-    )
-    acct = result.scalar_one_or_none()
-    if not acct:
-        print(f"[OMMA] No connected {platform} account for brand {item.brand_id} — skipping live post.")
+    if not settings.n8n_webhook_url:
+        print(f"[OMMA] N8N_WEBHOOK_URL not configured — skipping live post for item {item.id}.")
         return None
 
-    token = decrypt_token(acct.access_token)
     caption = "\n\n".join(filter(None, [item.text_body, item.hashtags]))
 
-    async with httpx.AsyncClient(timeout=20) as http:
-        if platform == "facebook":
-            pages_r = await http.get(
-                "https://graph.facebook.com/v19.0/me/accounts",
-                params={"access_token": token},
-            )
-            pages = pages_r.json().get("data", [])
-            if not pages:
-                raise ValueError("No Facebook Pages found for this token.")
-            page = pages[0]
-            r = await http.post(
-                f"https://graph.facebook.com/v19.0/{page['id']}/feed",
-                json={"message": caption, "access_token": page["access_token"]},
-            )
-            r.raise_for_status()
-            return r.json().get("id")
-
-        elif platform == "instagram":
-            # Get the IG Business account linked to the user's page
-            pages_r = await http.get(
-                "https://graph.facebook.com/v19.0/me/accounts",
-                params={"access_token": token, "fields": "id,instagram_business_account"},
-            )
-            pages = pages_r.json().get("data", [])
-            ig_id = next(
-                (p["instagram_business_account"]["id"] for p in pages if "instagram_business_account" in p),
-                None,
-            )
-            if not ig_id:
-                raise ValueError("No Instagram Business account linked to this token.")
-            # Step 1: create media container
-            container_r = await http.post(
-                f"https://graph.facebook.com/v19.0/{ig_id}/media",
-                params={
-                    "caption": caption,
-                    "image_url": item.image_url or "",
-                    "access_token": token,
-                },
-            )
-            container_r.raise_for_status()
-            container_id = container_r.json()["id"]
-            # Step 2: publish container
-            pub_r = await http.post(
-                f"https://graph.facebook.com/v19.0/{ig_id}/media_publish",
-                params={"creation_id": container_id, "access_token": token},
-            )
-            pub_r.raise_for_status()
-            return pub_r.json().get("id")
-
-        elif platform == "linkedin":
-            # Fetch member URN
-            me_r = await http.get(
-                "https://api.linkedin.com/v2/me",
-                headers={"Authorization": f"Bearer {token}"},
-            )
-            me_r.raise_for_status()
-            urn = f"urn:li:person:{me_r.json()['id']}"
-            post_r = await http.post(
-                "https://api.linkedin.com/v2/ugcPosts",
-                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                json={
-                    "author": urn,
-                    "lifecycleState": "PUBLISHED",
-                    "specificContent": {
-                        "com.linkedin.ugc.ShareContent": {
-                            "shareCommentary": {"text": caption},
-                            "shareMediaCategory": "NONE",
-                        }
-                    },
-                    "visibility": {"com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC"},
-                },
-            )
-            post_r.raise_for_status()
-            return post_r.headers.get("x-restli-id")
-
-        elif platform == "tiktok":
-            r = await http.post(
-                "https://open.tiktokapis.com/v2/post/publish/text/create/",
-                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                json={
-                    "post_info": {
-                        "title": caption[:150],
-                        "privacy_level": "PUBLIC_TO_EVERYONE",
-                        "disable_comment": False,
-                        "disable_duet": False,
-                        "disable_stitch": False,
-                    },
-                    "source_info": {"source": "FILE_UPLOAD"},
-                },
-            )
-            r.raise_for_status()
-            return r.json().get("data", {}).get("publish_id")
-
-    return None
+    async with httpx.AsyncClient(timeout=30) as http:
+        r = await http.post(
+            settings.n8n_webhook_url,
+            json={
+                "platform": item.platform.value,
+                "brand_id": item.brand_id,
+                "content_item_id": item.id,
+                "text": caption,
+                "image_url": item.image_url,
+            },
+        )
+        if not r.is_success:
+            print(f"[OMMA] n8n webhook returned {r.status_code}: {r.text[:200]}")
+            return None
+        data = r.json() if r.content else {}
+        return data.get("post_id") or f"n8n_{item.id}"
 
 
 # ─── Scheduled tasks ─────────────────────────────────────────────────────────

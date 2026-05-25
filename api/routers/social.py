@@ -1,23 +1,20 @@
 """
-Social media OAuth router.
+Social media accounts router — credentials managed by n8n.
+
+Users connect social accounts inside n8n (see GET /social/n8n-url).
+These endpoints track which platforms are marked as active per brand
+so the Content Studio knows which platforms are available.
 
 Endpoints:
-  GET  /social/connect/{platform}         — redirect to OAuth provider (browser popup)
-  GET  /social/callback/{platform}        — handle provider callback, store token
-  GET  /social/brands/{brand_id}/accounts — list connected accounts for a brand
-  DELETE /social/accounts/{account_id}   — disconnect an account
+  GET    /social/n8n-url                    — return n8n dashboard URL
+  GET    /social/brands/{brand_id}/accounts — list connected platforms for a brand
+  POST   /social/brands/{brand_id}/accounts — mark a platform as connected
+  DELETE /social/accounts/{account_id}      — disconnect a platform
 """
 
-import base64
-import hashlib
-import hmac
-import json
-import time
-from datetime import datetime, timezone
+from datetime import datetime
 
-import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,378 +27,32 @@ from ..models.user import User
 
 router = APIRouter()
 
-# ─── Platform OAuth config ────────────────────────────────────────────────────
-
-PLATFORM_CONFIG: dict[str, dict] = {
-    "facebook": {
-        "auth_url": "https://www.facebook.com/v19.0/dialog/oauth",
-        "token_url": "https://graph.facebook.com/v19.0/oauth/access_token",
-        "scopes": "pages_manage_posts,pages_read_engagement",
-    },
-    "instagram": {
-        "auth_url": "https://www.facebook.com/v19.0/dialog/oauth",
-        "token_url": "https://graph.facebook.com/v19.0/oauth/access_token",
-        "scopes": "instagram_basic,instagram_content_publish,pages_manage_posts,pages_read_engagement",
-    },
-    "linkedin": {
-        "auth_url": "https://www.linkedin.com/oauth/v2/authorization",
-        "token_url": "https://www.linkedin.com/oauth/v2/accessToken",
-        "scopes": "openid,profile,email,w_member_social",
-    },
-    "tiktok": {
-        "auth_url": "https://www.tiktok.com/v2/auth/authorize/",
-        "token_url": "https://open.tiktokapis.com/v2/oauth/token/",
-        "scopes": "video.upload,video.publish",
-    },
-}
+SUPPORTED_PLATFORMS = {"facebook", "instagram", "linkedin", "tiktok"}
 
 
-def _platform_client_id(platform: str) -> str:
-    return {
-        "facebook":  settings.meta_app_id,
-        "instagram": settings.meta_app_id,
-        "linkedin":  settings.linkedin_client_id,
-        "tiktok":    settings.tiktok_client_key,
-    }.get(platform, "")
+# ─── n8n URL ──────────────────────────────────────────────────────────────────
+
+class N8nUrlOut(BaseModel):
+    url: str
 
 
-def _platform_client_secret(platform: str) -> str:
-    return {
-        "facebook":  settings.meta_app_secret,
-        "instagram": settings.meta_app_secret,
-        "linkedin":  settings.linkedin_client_secret,
-        "tiktok":    settings.tiktok_client_secret,
-    }.get(platform, "")
-
-
-# ─── Token encryption ─────────────────────────────────────────────────────────
-
-def _fernet_key() -> bytes:
-    digest = hashlib.sha256(settings.oauth_encryption_key.encode()).digest()
-    return base64.urlsafe_b64encode(digest)
-
-
-def encrypt_token(token: str) -> str:
-    from cryptography.fernet import Fernet
-    return Fernet(_fernet_key()).encrypt(token.encode()).decode()
-
-
-def decrypt_token(enc: str) -> str:
-    from cryptography.fernet import Fernet
-    return Fernet(_fernet_key()).decrypt(enc.encode()).decode()
-
-
-# ─── CSRF state helpers ───────────────────────────────────────────────────────
-
-def _create_state(brand_id: int, platform: str) -> str:
-    payload = json.dumps({"b": brand_id, "p": platform, "t": int(time.time())})
-    sig = hmac.new(settings.secret_key.encode(), payload.encode(), hashlib.sha256).hexdigest()[:20]
-    raw = f"{payload}|{sig}"
-    return base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
-
-
-def _verify_state(state: str) -> tuple[int, str]:
-    try:
-        padded = state + "=" * (4 - len(state) % 4)
-        raw = base64.urlsafe_b64decode(padded).decode()
-        payload_str, sig = raw.rsplit("|", 1)
-        expected = hmac.new(settings.secret_key.encode(), payload_str.encode(), hashlib.sha256).hexdigest()[:20]
-        if not hmac.compare_digest(sig, expected):
-            raise ValueError("bad sig")
-        data = json.loads(payload_str)
-        if int(time.time()) - data["t"] > 600:
-            raise ValueError("expired")
-        return int(data["b"]), str(data["p"])
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state.")
-
-
-# ─── HTML helpers ─────────────────────────────────────────────────────────────
-
-def _api_base(request: Request) -> str:
-    """Return the public-facing API base URL, preferring the configured setting over request headers."""
-    if settings.api_base_url:
-        return settings.api_base_url.rstrip("/")
-    # Fall back to X-Forwarded-Proto so Azure's TLS termination doesn't downgrade to http
-    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
-    return f"{scheme}://{request.url.netloc}"
-
-
-def _popup_success(platform: str, account_name: str) -> HTMLResponse:
-    safe_name = account_name.replace("'", "\\'")
-    return HTMLResponse(f"""<!DOCTYPE html><html><head><title>Connected</title></head><body>
-<p style="font-family:sans-serif;text-align:center;margin-top:40px">
-  ✅ Connected <strong>{safe_name}</strong> on {platform.title()}. Closing…
-</p>
-<script>
-  window.opener && window.opener.postMessage(
-    {{type:'oauth_success', platform:'{platform}', account:'{safe_name}'}}, '*'
-  );
-  setTimeout(function(){{window.close();}}, 1200);
-</script>
-</body></html>""")
-
-
-def _popup_error(msg: str) -> HTMLResponse:
-    return HTMLResponse(f"""<!DOCTYPE html><html><head><title>Error</title></head><body>
-<p style="font-family:sans-serif;text-align:center;margin-top:40px;color:red">
-  ❌ OAuth failed: {msg}
-</p>
-<script>
-  window.opener && window.opener.postMessage({{type:'oauth_error', message:'{msg}'}}, '*');
-  setTimeout(function(){{window.close();}}, 3000);
-</script>
-</body></html>""", status_code=400)
-
-
-# ─── Connect token (called by frontend with Authorization header) ─────────────
-
-class ConnectTokenOut(BaseModel):
-    connect_url: str
-
-
-@router.get("/connect-token", response_model=ConnectTokenOut)
-async def get_connect_token(
-    platform: str = Query(...),
-    brand_id: int = Query(...),
-    request: Request = None,
-    current_user: User = Depends(get_current_user),
-):
-    """
-    Return a signed, short-lived connect URL for the popup.
-    Called by the frontend via normal fetch (Authorization header works here).
-    The state token embedded in the URL doubles as both authentication and CSRF protection.
-    """
-    if platform not in PLATFORM_CONFIG:
-        raise HTTPException(status_code=400, detail=f"Unsupported platform: {platform}")
-    if not _platform_client_id(platform):
+@router.get("/n8n-url", response_model=N8nUrlOut)
+async def get_n8n_url(current_user: User = Depends(get_current_user)):
+    """Return the n8n dashboard URL where users connect their social accounts."""
+    if not settings.n8n_url:
         raise HTTPException(
-            status_code=500,
-            detail=f"OAuth credentials for {platform} are not configured on the server.",
+            status_code=503,
+            detail="n8n is not configured on this server. Set N8N_URL in environment variables.",
         )
-    state = _create_state(brand_id, platform)
-    connect_url = f"{_api_base(request)}/api/social/connect/{platform}?brand_id={brand_id}&state={state}"
-    return ConnectTokenOut(connect_url=connect_url)
+    return N8nUrlOut(url=settings.n8n_url)
 
 
-# ─── Connect ──────────────────────────────────────────────────────────────────
+# ─── Account models ───────────────────────────────────────────────────────────
 
-@router.get("/connect/{platform}")
-async def connect_platform(
-    platform: str,
-    request: Request,
-    brand_id: int = Query(...),
-    state: str = Query(...),    # HMAC-signed state from /connect-token — proves authenticated origin
-):
-    """Redirect the browser popup to the platform's OAuth consent screen."""
-    if platform not in PLATFORM_CONFIG:
-        raise HTTPException(status_code=400, detail=f"Unsupported platform: {platform}")
+class ConnectPlatformIn(BaseModel):
+    platform: str
+    account_name: str = ""
 
-    # Verify state proves this URL was issued by /connect-token to an authenticated user
-    state_brand_id, state_platform = _verify_state(state)
-    if state_brand_id != brand_id or state_platform != platform:
-        raise HTTPException(status_code=400, detail="State mismatch.")
-
-    client_id = _platform_client_id(platform)
-    if not client_id:
-        raise HTTPException(
-            status_code=500,
-            detail=f"OAuth credentials for {platform} are not configured on the server.",
-        )
-
-    # Regenerate a fresh state for the OAuth provider (same data, new timestamp)
-    state = _create_state(brand_id, platform)
-    callback = f"{_api_base(request)}/api/social/callback/{platform}"
-    cfg = PLATFORM_CONFIG[platform]
-
-    if platform == "tiktok":
-        auth_url = (
-            f"{cfg['auth_url']}?client_key={client_id}"
-            f"&scope={cfg['scopes']}&response_type=code"
-            f"&redirect_uri={callback}&state={state}"
-        )
-    else:
-        auth_url = (
-            f"{cfg['auth_url']}?client_id={client_id}"
-            f"&redirect_uri={callback}&scope={cfg['scopes']}"
-            f"&response_type=code&state={state}"
-        )
-
-    return RedirectResponse(auth_url)
-
-
-# ─── Callback ─────────────────────────────────────────────────────────────────
-
-@router.get("/callback/{platform}")
-async def oauth_callback(
-    platform: str,
-    request: Request,
-    code: str = Query(None),
-    state: str = Query(None),
-    error: str = Query(None),
-    error_description: str = Query(None),
-    db: AsyncSession = Depends(get_db),
-):
-    """Handle the provider redirect, exchange code for tokens, save to DB."""
-    if error:
-        return _popup_error(error_description or error)
-    if not code:
-        return _popup_error("No authorization code received from platform.")
-    if not state:
-        return _popup_error("Missing OAuth state parameter.")
-
-    brand_id, verified_platform = _verify_state(state)
-    if verified_platform != platform:
-        return _popup_error("Platform mismatch in OAuth state.")
-
-    cfg = PLATFORM_CONFIG.get(platform)
-    if not cfg:
-        return _popup_error(f"Unknown platform: {platform}")
-
-    client_id = _platform_client_id(platform)
-    client_secret = _platform_client_secret(platform)
-    callback = f"{_api_base(request)}/api/social/callback/{platform}"
-
-    async with httpx.AsyncClient(timeout=15) as http:
-        # ── Exchange code for access token ────────────────────────────────────
-        try:
-            if platform == "tiktok":
-                token_resp = await http.post(cfg["token_url"], json={
-                    "client_key": client_id,
-                    "client_secret": client_secret,
-                    "code": code,
-                    "grant_type": "authorization_code",
-                    "redirect_uri": callback,
-                })
-            elif platform == "linkedin":
-                token_resp = await http.post(cfg["token_url"], data={
-                    "grant_type": "authorization_code",
-                    "code": code,
-                    "redirect_uri": callback,
-                    "client_id": client_id,
-                    "client_secret": client_secret,
-                }, headers={"Content-Type": "application/x-www-form-urlencoded"})
-            else:
-                token_resp = await http.get(cfg["token_url"], params={
-                    "client_id": client_id,
-                    "client_secret": client_secret,
-                    "code": code,
-                    "redirect_uri": callback,
-                })
-
-            token_data = token_resp.json()
-        except Exception as e:
-            return _popup_error(f"Token exchange failed: {e}")
-
-        if "error" in token_data:
-            return _popup_error(token_data.get("error_description") or token_data["error"])
-
-        access_token = (
-            token_data.get("access_token")
-            or token_data.get("data", {}).get("access_token", "")
-        )
-        refresh_token = (
-            token_data.get("refresh_token")
-            or token_data.get("data", {}).get("refresh_token")
-        )
-        expires_in = token_data.get("expires_in") or token_data.get("data", {}).get("expires_in")
-        expires_at = (
-            datetime.fromtimestamp(time.time() + int(expires_in), tz=timezone.utc).replace(tzinfo=None)
-            if expires_in else None
-        )
-
-        if not access_token:
-            return _popup_error("No access token returned by platform.")
-
-        # ── Fetch account info ────────────────────────────────────────────────
-        try:
-            account_id, account_name, avatar_url = await _fetch_account_info(
-                http, platform, access_token
-            )
-        except Exception as e:
-            return _popup_error(f"Could not fetch account info: {e}")
-
-    # ── Upsert SocialAccount ──────────────────────────────────────────────────
-    existing = await db.execute(
-        select(SocialAccount).where(
-            SocialAccount.brand_id == brand_id,
-            SocialAccount.platform == platform,
-            SocialAccount.account_id == account_id,
-        )
-    )
-    acct = existing.scalar_one_or_none()
-
-    if acct:
-        acct.access_token = encrypt_token(access_token)
-        acct.refresh_token = encrypt_token(refresh_token) if refresh_token else None
-        acct.token_expires_at = expires_at
-        acct.account_name = account_name
-        acct.avatar_url = avatar_url
-        acct.is_active = True
-        acct.updated_at = datetime.utcnow()
-    else:
-        acct = SocialAccount(
-            brand_id=brand_id,
-            platform=platform,
-            account_id=account_id,
-            account_name=account_name,
-            avatar_url=avatar_url,
-            access_token=encrypt_token(access_token),
-            refresh_token=encrypt_token(refresh_token) if refresh_token else None,
-            token_expires_at=expires_at,
-            scopes=cfg["scopes"],
-            is_active=True,
-            connected_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
-        )
-        db.add(acct)
-
-    await db.commit()
-    return _popup_success(platform, account_name)
-
-
-async def _fetch_account_info(
-    http: httpx.AsyncClient, platform: str, access_token: str
-) -> tuple[str, str, str | None]:
-    """Returns (account_id, account_name, avatar_url)."""
-    if platform in ("facebook", "instagram"):
-        r = await http.get(
-            "https://graph.facebook.com/v19.0/me",
-            params={"access_token": access_token, "fields": "id,name,picture"},
-        )
-        d = r.json()
-        return (
-            d["id"],
-            d.get("name", "Facebook Account"),
-            d.get("picture", {}).get("data", {}).get("url"),
-        )
-
-    elif platform == "linkedin":
-        r = await http.get(
-            "https://api.linkedin.com/v2/userinfo",
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-        d = r.json()
-        name = d.get("name") or f"{d.get('given_name','')} {d.get('family_name','')}".strip()
-        return d["sub"], name or "LinkedIn Member", d.get("picture")
-
-    elif platform == "tiktok":
-        r = await http.get(
-            "https://open.tiktokapis.com/v2/user/info/",
-            headers={"Authorization": f"Bearer {access_token}"},
-            params={"fields": "open_id,display_name,avatar_url"},
-        )
-        d = r.json().get("data", {}).get("user", {})
-        return (
-            d.get("open_id", ""),
-            d.get("display_name", "TikTok Account"),
-            d.get("avatar_url"),
-        )
-
-    raise ValueError(f"Unsupported platform: {platform}")
-
-
-# ─── List connected accounts ──────────────────────────────────────────────────
 
 class SocialAccountOut(BaseModel):
     id: int
@@ -417,6 +68,59 @@ class SocialAccountOut(BaseModel):
 
     model_config = {"from_attributes": True}
 
+
+# ─── Mark connected ───────────────────────────────────────────────────────────
+
+@router.post("/brands/{brand_id}/accounts", response_model=SocialAccountOut, status_code=status.HTTP_201_CREATED)
+async def mark_platform_connected(
+    brand_id: int,
+    body: ConnectPlatformIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Mark a social platform as connected for a brand.
+    The actual OAuth credential lives in n8n; this record tells OMMA the platform is active.
+    """
+    if body.platform not in SUPPORTED_PLATFORMS:
+        raise HTTPException(status_code=400, detail=f"Unsupported platform: {body.platform}")
+
+    existing = await db.execute(
+        select(SocialAccount).where(
+            SocialAccount.brand_id == brand_id,
+            SocialAccount.platform == body.platform,
+        )
+    )
+    acct = existing.scalar_one_or_none()
+
+    if acct:
+        acct.is_active = True
+        if body.account_name:
+            acct.account_name = body.account_name
+        acct.updated_at = datetime.utcnow()
+    else:
+        acct = SocialAccount(
+            brand_id=brand_id,
+            platform=body.platform,
+            account_id=f"n8n_{body.platform}_{brand_id}",
+            account_name=body.account_name or body.platform.title(),
+            avatar_url=None,
+            access_token="n8n_managed",
+            refresh_token=None,
+            token_expires_at=None,
+            scopes=None,
+            is_active=True,
+            connected_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        db.add(acct)
+
+    await db.commit()
+    await db.refresh(acct)
+    return acct
+
+
+# ─── List connected accounts ──────────────────────────────────────────────────
 
 @router.get("/brands/{brand_id}/accounts", response_model=list[SocialAccountOut])
 async def list_accounts(
