@@ -1,14 +1,13 @@
 """
-Social media accounts router — credentials managed by n8n.
+Social media accounts router — manual account management.
 
-Users connect social accounts inside n8n (see GET /social/n8n-url).
-These endpoints track which platforms are marked as active per brand
+Users add their social account handles directly in OMMA.
+These endpoints track which platforms are active per brand
 so the Content Studio knows which platforms are available.
 
 Endpoints:
-  GET    /social/n8n-url                    — return n8n dashboard URL
   GET    /social/brands/{brand_id}/accounts — list connected platforms for a brand
-  POST   /social/brands/{brand_id}/accounts — mark a platform as connected
+  POST   /social/brands/{brand_id}/accounts — add a connected platform
   DELETE /social/accounts/{account_id}      — disconnect a platform
 """
 
@@ -19,7 +18,6 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..config import settings
 from ..database import get_db
 from ..models.social import SocialAccount
 from ..routers.auth import get_current_user
@@ -28,23 +26,6 @@ from ..models.user import User
 router = APIRouter()
 
 SUPPORTED_PLATFORMS = {"facebook", "instagram", "linkedin", "tiktok"}
-
-
-# ─── n8n URL ──────────────────────────────────────────────────────────────────
-
-class N8nUrlOut(BaseModel):
-    url: str
-
-
-@router.get("/n8n-url", response_model=N8nUrlOut)
-async def get_n8n_url(current_user: User = Depends(get_current_user)):
-    """Return the n8n dashboard URL where users connect their social accounts."""
-    if not settings.n8n_url:
-        raise HTTPException(
-            status_code=503,
-            detail="n8n is not configured on this server. Set N8N_URL in environment variables.",
-        )
-    return N8nUrlOut(url=settings.n8n_url)
 
 
 # ─── Account models ───────────────────────────────────────────────────────────
@@ -78,10 +59,7 @@ async def mark_platform_connected(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Mark a social platform as connected for a brand.
-    The actual OAuth credential lives in n8n; this record tells OMMA the platform is active.
-    """
+    """Add a social platform account for a brand."""
     if body.platform not in SUPPORTED_PLATFORMS:
         raise HTTPException(status_code=400, detail=f"Unsupported platform: {body.platform}")
 
@@ -102,10 +80,10 @@ async def mark_platform_connected(
         acct = SocialAccount(
             brand_id=brand_id,
             platform=body.platform,
-            account_id=f"n8n_{body.platform}_{brand_id}",
+            account_id=f"{body.platform}_{brand_id}",
             account_name=body.account_name or body.platform.title(),
             avatar_url=None,
-            access_token="n8n_managed",
+            access_token="manual",
             refresh_token=None,
             token_expires_at=None,
             scopes=None,

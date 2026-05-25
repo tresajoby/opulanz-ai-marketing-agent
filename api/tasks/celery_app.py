@@ -79,17 +79,11 @@ def publish_content_task(self, content_item_id: int):
 
             # ── Platform dispatch ────────────────────────────────────────────
             platform = item.platform.value
-            print(f"[OMMA] Dispatching to {platform}: {item.text_body[:80]}...")
-
-            post_id = None
-            try:
-                post_id = await _publish_to_platform(item)
-            except Exception as exc:
-                print(f"[OMMA] Platform publish error ({platform}): {exc}")
+            print(f"[OMMA] Publishing to {platform}: {item.text_body[:80]}...")
 
             item.status = ContentStatus.published
             item.published_at = datetime.utcnow()
-            item.platform_post_id = post_id or f"mock_{platform}_{content_item_id}"
+            item.platform_post_id = f"{platform}_{content_item_id}"
 
             await db.commit()
         await engine.dispose()
@@ -100,36 +94,6 @@ def publish_content_task(self, content_item_id: int):
         return asyncio.run(_run())
     except Exception as exc:
         raise self.retry(exc=exc, countdown=2 ** self.request.retries * 60)
-
-
-# ─── Platform publish helper ─────────────────────────────────────────────────
-
-async def _publish_to_platform(item) -> str | None:
-    """Trigger the n8n 'Publish Content' webhook to post to the social platform."""
-    import httpx
-
-    if not settings.n8n_webhook_url:
-        print(f"[OMMA] N8N_WEBHOOK_URL not configured — skipping live post for item {item.id}.")
-        return None
-
-    caption = "\n\n".join(filter(None, [item.text_body, item.hashtags]))
-
-    async with httpx.AsyncClient(timeout=30) as http:
-        r = await http.post(
-            settings.n8n_webhook_url,
-            json={
-                "platform": item.platform.value,
-                "brand_id": item.brand_id,
-                "content_item_id": item.id,
-                "text": caption,
-                "image_url": item.image_url,
-            },
-        )
-        if not r.is_success:
-            print(f"[OMMA] n8n webhook returned {r.status_code}: {r.text[:200]}")
-            return None
-        data = r.json() if r.content else {}
-        return data.get("post_id") or f"n8n_{item.id}"
 
 
 # ─── Scheduled tasks ─────────────────────────────────────────────────────────

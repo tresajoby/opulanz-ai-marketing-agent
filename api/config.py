@@ -28,12 +28,6 @@ class Settings(BaseSettings):
     # Set this in Azure: API_BASE_URL=https://omma-prod-api.orangetree-ce90bec0.francecentral.azurecontainerapps.io
     api_base_url: str = ""
 
-    # n8n workflow automation — handles social media OAuth and publishing
-    # N8N_URL: public URL of the n8n dashboard (shown to users in Connected Accounts tab)
-    # N8N_WEBHOOK_URL: webhook URL of the "Publish Content" workflow in n8n
-    n8n_url: str = ""
-    n8n_webhook_url: str = ""
-
     # Embeddings (local sentence-transformers model)
     embedding_model: str = "all-MiniLM-L6-v2"
     embedding_dimensions: int = 384

@@ -168,6 +168,4 @@ export const socialApi = {
     }),
   disconnect: (accountId: number) =>
     request(`/api/social/accounts/${accountId}`, { method: "DELETE" }),
-  getN8nUrl: () =>
-    request<{ url: string }>("/api/social/n8n-url"),
 };
