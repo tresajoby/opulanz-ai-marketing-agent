@@ -161,11 +161,8 @@ export const contentApi = {
 export const socialApi = {
   listAccounts: (brandId: number) =>
     request<SocialAccount[]>(`/api/social/brands/${brandId}/accounts`),
-  markConnected: (brandId: number, platform: string, accountName: string) =>
-    request<SocialAccount>(`/api/social/brands/${brandId}/accounts`, {
-      method: "POST",
-      body: JSON.stringify({ platform, account_name: accountName }),
-    }),
+  getConnectUrl: (platform: string, brandId: number) =>
+    `${BASE}/api/social/connect/${platform}?brand_id=${brandId}`,
   disconnect: (accountId: number) =>
     request(`/api/social/accounts/${accountId}`, { method: "DELETE" }),
 };

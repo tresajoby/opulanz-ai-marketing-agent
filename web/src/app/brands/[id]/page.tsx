@@ -120,7 +120,7 @@ export default function BrandDetailPage() {
   );
 }
 
-// ─── Social Accounts Tab (manual) ────────────────────────────────────────────
+// ─── Social Accounts Tab ──────────────────────────────────────────────────────
 
 const SOCIAL_PLATFORMS: { key: string; label: string; color: string; textColor: string; abbr: string }[] = [
   { key: "instagram", label: "Instagram", color: "from-purple-500 to-pink-500", textColor: "text-white", abbr: "IG" },
@@ -128,6 +128,8 @@ const SOCIAL_PLATFORMS: { key: string; label: string; color: string; textColor: 
   { key: "linkedin",  label: "LinkedIn",  color: "bg-blue-700",                 textColor: "text-white", abbr: "in" },
   { key: "tiktok",    label: "TikTok",    color: "bg-gray-900",                 textColor: "text-white", abbr: "TT" },
 ];
+
+const POPUP_OPTS = "width=520,height=680,scrollbars=yes,resizable=yes";
 
 function SocialAccountsTab({
   brandId,
@@ -141,23 +143,26 @@ function SocialAccountsTab({
   refetch: () => void;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
-  const [adding, setAdding] = useState<string | null>(null);
-  const [accountName, setAccountName] = useState("");
 
-  async function handleAdd(platform: string) {
-    const name = accountName.trim() || platform.charAt(0).toUpperCase() + platform.slice(1);
-    setBusy(platform);
-    try {
-      await socialApi.markConnected(brandId, platform, name);
-      refetch();
-      onFlash("success", `${platform.charAt(0).toUpperCase() + platform.slice(1)} connected.`);
-      setAdding(null);
-      setAccountName("");
-    } catch (e: unknown) {
-      onFlash("error", e instanceof Error ? e.message : "Failed to save account.");
-    } finally {
-      setBusy(null);
+  function handleConnect(platform: string) {
+    const url = socialApi.getConnectUrl(platform, brandId);
+    const popup = window.open(url, `connect_${platform}`, POPUP_OPTS);
+    if (!popup) {
+      onFlash("error", "Popup blocked — please allow popups for this site.");
+      return;
     }
+
+    const listener = (e: MessageEvent) => {
+      if (!e.data || typeof e.data !== "object") return;
+      window.removeEventListener("message", listener);
+      if (e.data.success) {
+        refetch();
+        onFlash("success", e.data.message || `${platform} connected.`);
+      } else {
+        onFlash("error", e.data.message || `${platform} connection failed.`);
+      }
+    };
+    window.addEventListener("message", listener);
   }
 
   async function handleDisconnect(acct: SocialAccount) {
@@ -183,7 +188,8 @@ function SocialAccountsTab({
           <h3 className="font-semibold text-gray-900">Connected Social Accounts</h3>
         </div>
         <p className="text-xs text-gray-500 mt-1">
-          Add your social account handles so OMMA knows which platforms to publish to.
+          Connect your accounts via OAuth. When you publish, OMMA{"'"}s AI agent reformats each post
+          for its platform before sending it live.
         </p>
       </CardHeader>
       <CardBody>
@@ -192,79 +198,48 @@ function SocialAccountsTab({
             const acct = connectedByPlatform[plat.key];
             const isConnected = !!acct;
             const isGradient = plat.color.startsWith("from-");
-            const isBusy = busy === plat.key || busy === `disconnect-${acct?.id}`;
-            const isAdding = adding === plat.key;
+            const isBusy = busy === `disconnect-${acct?.id}`;
 
             return (
               <div
                 key={plat.key}
-                className={`rounded-xl border p-4 flex flex-col gap-3 ${
+                className={`rounded-xl border p-4 flex items-center gap-3 ${
                   isConnected ? "border-emerald-200 bg-emerald-50" : "border-gray-200 bg-gray-50"
                 }`}
               >
-                <div className="flex items-center gap-3">
-                  <div className={`h-10 w-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${
-                    isConnected
-                      ? isGradient ? `bg-gradient-to-br ${plat.color} ${plat.textColor}` : `${plat.color} ${plat.textColor}`
-                      : "bg-gray-200 text-gray-500"
-                  }`}>
-                    {plat.abbr}
-                  </div>
-
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900">{plat.label}</p>
-                    {isConnected
-                      ? <p className="text-xs text-emerald-700 truncate">{acct.account_name}</p>
-                      : <p className="text-xs text-gray-400">Not connected</p>
-                    }
-                  </div>
-
-                  {isConnected ? (
-                    <button
-                      onClick={() => handleDisconnect(acct)}
-                      disabled={isBusy}
-                      className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-50 disabled:opacity-50 transition-colors shrink-0"
-                    >
-                      {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Link2Off className="h-3.5 w-3.5" />}
-                      Disconnect
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => { setAdding(plat.key); setAccountName(""); }}
-                      disabled={isBusy || isAdding}
-                      className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 px-2 py-1 rounded hover:bg-indigo-50 disabled:opacity-50 transition-colors shrink-0 font-medium"
-                    >
-                      <Link2 className="h-3.5 w-3.5" />
-                      Add account
-                    </button>
-                  )}
+                <div className={`h-10 w-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${
+                  isConnected
+                    ? isGradient ? `bg-gradient-to-br ${plat.color} ${plat.textColor}` : `${plat.color} ${plat.textColor}`
+                    : "bg-gray-200 text-gray-500"
+                }`}>
+                  {plat.abbr}
                 </div>
 
-                {isAdding && (
-                  <div className="flex gap-2">
-                    <input
-                      autoFocus
-                      type="text"
-                      placeholder={`@${plat.label.toLowerCase()} handle`}
-                      value={accountName}
-                      onChange={(e) => setAccountName(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") handleAdd(plat.key); if (e.key === "Escape") { setAdding(null); setAccountName(""); } }}
-                      className="flex-1 text-xs px-2.5 py-1.5 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
-                    />
-                    <button
-                      onClick={() => handleAdd(plat.key)}
-                      disabled={isBusy}
-                      className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 font-medium"
-                    >
-                      {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save"}
-                    </button>
-                    <button
-                      onClick={() => { setAdding(null); setAccountName(""); }}
-                      className="text-xs px-2.5 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-100"
-                    >
-                      Cancel
-                    </button>
-                  </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-900">{plat.label}</p>
+                  {isConnected
+                    ? <p className="text-xs text-emerald-700 truncate">{acct.account_name}</p>
+                    : <p className="text-xs text-gray-400">Not connected</p>
+                  }
+                </div>
+
+                {isConnected ? (
+                  <button
+                    onClick={() => handleDisconnect(acct)}
+                    disabled={isBusy}
+                    className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-50 disabled:opacity-50 transition-colors shrink-0"
+                  >
+                    {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Link2Off className="h-3.5 w-3.5" />}
+                    Disconnect
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleConnect(plat.key)}
+                    className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 px-2 py-1 rounded hover:bg-indigo-50 transition-colors shrink-0 font-medium"
+                  >
+                    <Link2 className="h-3.5 w-3.5" />
+                    Connect
+                  </button>
                 )}
               </div>
             );

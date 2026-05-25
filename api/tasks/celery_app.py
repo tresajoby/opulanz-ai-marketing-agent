@@ -7,7 +7,6 @@ Background tasks:
   - compliance_sweep_task  : expires stale approval queue entries
 """
 
-import os
 from celery import Celery
 from celery.schedules import crontab
 
@@ -49,48 +48,74 @@ celery_app.conf.update(
 @celery_app.task(name="api.tasks.celery_app.publish_content_task", bind=True, max_retries=3)
 def publish_content_task(self, content_item_id: int):
     """
-    Post approved content to the target social media platform.
-    Retries up to 3 times with exponential backoff on failure.
-
-    Platform clients are added here as integrations are connected:
-      - Facebook/Instagram: Meta Graph API
-      - TikTok: TikTok for Business API
-
-    For now, logs the intent and marks the item as published in the database.
-    Replace the placeholder with real API calls when platform tokens are configured.
+    1. Load the approved ContentItem from DB.
+    2. Ask the SocialPublishingAgent (Claude) to format it for the target platform.
+    3. Find the brand's connected SocialAccount for that platform.
+    4. Call the platform publisher to post it.
+    5. Save the resulting post ID and mark the item published.
+    Retries up to 3× with exponential backoff on any failure.
     """
     import asyncio
-    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-    from sqlalchemy import select
     from datetime import datetime
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+    from ..agents.social_agent import social_publishing_agent
     from ..models.content import ContentItem, ContentStatus
+    from ..models.social import SocialAccount
+    from ..services.social_publisher import PostPayload, publish_to_platform
 
     async def _run():
         engine = create_async_engine(settings.database_url)
-        SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-        async with SessionLocal() as db:
-            result = await db.execute(
+        async with Session() as db:
+            # Load content item
+            item = (await db.execute(
                 select(ContentItem).where(ContentItem.id == content_item_id)
-            )
-            item = result.scalar_one_or_none()
+            )).scalar_one_or_none()
             if not item:
                 return {"error": f"ContentItem {content_item_id} not found"}
 
-            # ── Platform dispatch ────────────────────────────────────────────
             platform = item.platform.value
             print(f"[OMMA] Publishing to {platform}: {item.text_body[:80]}...")
 
+            # Find connected social account for this brand + platform
+            account = (await db.execute(
+                select(SocialAccount).where(
+                    SocialAccount.brand_id == item.brand_id,
+                    SocialAccount.platform == platform,
+                    SocialAccount.is_active == True,
+                )
+            )).scalar_one_or_none()
+
+            post_id: str | None = None
+
+            if account:
+                # Format content with the AI agent, then publish
+                try:
+                    prepared = await social_publishing_agent.prepare_post(item)
+                    post = PostPayload(
+                        text=prepared.text_body,
+                        hashtags=prepared.hashtags,
+                        image_url=item.image_url,
+                    )
+                    post_id = await publish_to_platform(account, post)
+                    print(f"[OMMA] Published to {platform}, post_id={post_id}")
+                except Exception as exc:
+                    print(f"[OMMA] Publish error ({platform}): {exc}")
+            else:
+                print(f"[OMMA] No connected account for {platform} on brand {item.brand_id} — skipping live post")
+
             item.status = ContentStatus.published
             item.published_at = datetime.utcnow()
-            item.platform_post_id = f"{platform}_{content_item_id}"
-
+            item.platform_post_id = post_id or f"{platform}_{content_item_id}"
             await db.commit()
+
         await engine.dispose()
-        return {"status": "published", "content_item_id": content_item_id}
+        return {"status": "published", "content_item_id": content_item_id, "post_id": post_id}
 
     try:
-        import asyncio
         return asyncio.run(_run())
     except Exception as exc:
         raise self.retry(exc=exc, countdown=2 ** self.request.retries * 60)
