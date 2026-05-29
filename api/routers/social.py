@@ -52,7 +52,7 @@ _PLATFORM_CONFIG = {
     "linkedin": {
         "auth_url": "https://www.linkedin.com/oauth/v2/authorization",
         "token_url": "https://www.linkedin.com/oauth/v2/accessToken",
-        "scopes": "openid profile email w_member_social",
+        "scopes": "w_member_social openid profile email",
     },
     "tiktok": {
         "auth_url": "https://www.tiktok.com/v2/auth/authorize/",
@@ -354,19 +354,24 @@ async def _handle_linkedin_callback(
     access_token = token_data["access_token"]
     scopes = token_data.get("scope", "")
 
-    async with httpx.AsyncClient(timeout=15) as http:
-        me_r = await http.get(
-            "https://api.linkedin.com/v2/userinfo",
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-        me_r.raise_for_status()
-        me = me_r.json()
-
-    person_id = me.get("sub", "")
-    name = me.get("name") or me.get("given_name", "LinkedIn User")
+    # Try OpenID Connect userinfo first; fall back gracefully if not enabled
+    person_id = ""
+    name = "LinkedIn User"
+    try:
+        async with httpx.AsyncClient(timeout=15) as http:
+            me_r = await http.get(
+                "https://api.linkedin.com/v2/userinfo",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            if me_r.is_success:
+                me = me_r.json()
+                person_id = me.get("sub", "")
+                name = me.get("name") or me.get("given_name") or name
+    except Exception:
+        pass
 
     return await _upsert_account(
-        db, brand_id, "linkedin", person_id, name, access_token, scopes=scopes
+        db, brand_id, "linkedin", person_id or f"li_{brand_id}", name, access_token, scopes=scopes
     )
 
 
