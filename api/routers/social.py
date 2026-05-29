@@ -20,6 +20,7 @@ from datetime import datetime
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import HTMLResponse, RedirectResponse
+from jose import JWTError, jwt
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,6 +60,17 @@ _PLATFORM_CONFIG = {
         "scopes": "user.info.basic,video.publish",
     },
 }
+
+# ─── Token verifier (for popup/redirect flows that can't use headers) ────────
+
+def _verify_token(token: str) -> None:
+    try:
+        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+        if payload.get("sub") is None:
+            raise ValueError
+    except (JWTError, ValueError):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
 
 # ─── HMAC state helpers ───────────────────────────────────────────────────────
 
@@ -126,9 +138,10 @@ def _popup_result(success: bool, message: str, data: dict | None = None) -> HTML
 async def connect_platform(
     platform: str,
     brand_id: int = Query(...),
-    current_user: User = Depends(get_current_user),
+    token: str = Query(...),
 ):
     """Generate an OAuth authorization URL and redirect the user there."""
+    _verify_token(token)
     if platform not in SUPPORTED_PLATFORMS:
         raise HTTPException(status_code=400, detail=f"Unsupported platform: {platform}")
 

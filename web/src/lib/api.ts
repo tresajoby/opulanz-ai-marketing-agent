@@ -161,8 +161,10 @@ export const contentApi = {
 export const socialApi = {
   listAccounts: (brandId: number) =>
     request<SocialAccount[]>(`/api/social/brands/${brandId}/accounts`),
-  getConnectUrl: (platform: string, brandId: number) =>
-    `${BASE}/api/social/connect/${platform}?brand_id=${brandId}`,
+  getConnectUrl: (platform: string, brandId: number) => {
+    const token = getToken();
+    return `${BASE}/api/social/connect/${platform}?brand_id=${brandId}&token=${token ?? ""}`;
+  },
   disconnect: (accountId: number) =>
     request(`/api/social/accounts/${accountId}`, { method: "DELETE" }),
 };
