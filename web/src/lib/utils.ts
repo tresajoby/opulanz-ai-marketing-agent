@@ -11,6 +11,7 @@ export function platformLabel(p: Platform): string {
     facebook: "Facebook",
     instagram: "Instagram",
     tiktok: "TikTok",
+    linkedin: "LinkedIn",
     google_ads: "Google Ads",
     facebook_ads: "Facebook Ads",
   };
@@ -22,6 +23,7 @@ export function platformColor(p: Platform): string {
     facebook: "bg-blue-100 text-blue-800",
     instagram: "bg-pink-100 text-pink-800",
     tiktok: "bg-slate-100 text-slate-800",
+    linkedin: "bg-blue-100 text-blue-800",
     google_ads: "bg-yellow-100 text-yellow-800",
     facebook_ads: "bg-blue-100 text-blue-800",
   };

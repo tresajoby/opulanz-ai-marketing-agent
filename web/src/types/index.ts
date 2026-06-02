@@ -76,6 +76,7 @@ export type Platform =
   | "facebook"
   | "instagram"
   | "tiktok"
+  | "linkedin"
   | "google_ads"
   | "facebook_ads";
 

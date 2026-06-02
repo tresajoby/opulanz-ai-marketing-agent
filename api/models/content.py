@@ -9,6 +9,7 @@ class Platform(str, enum.Enum):
     facebook = "facebook"
     instagram = "instagram"
     tiktok = "tiktok"
+    linkedin = "linkedin"
     google_ads = "google_ads"
     facebook_ads = "facebook_ads"
 

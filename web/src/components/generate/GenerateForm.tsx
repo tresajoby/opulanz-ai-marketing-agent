@@ -62,6 +62,7 @@ export function GenerateForm() {
         { value: "instagram", label: "Instagram" },
         { value: "facebook",  label: "Facebook" },
         { value: "tiktok",    label: "TikTok" },
+        { value: "linkedin",  label: "LinkedIn" },
         ...AD_PLATFORMS,
       ];
   const [goal, setGoal] = useState("");

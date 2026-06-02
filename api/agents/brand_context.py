@@ -36,6 +36,12 @@ PLATFORM_SPECS = {
         "supports_hashtags": True,
         "notes": "Trend-aware. First 3 seconds = the hook. Casual, authentic, direct.",
     },
+    Platform.linkedin: {
+        "max_chars": 3000,
+        "recommended_chars": 500,
+        "supports_hashtags": True,
+        "notes": "Professional and insightful tone. Lead with value. Use line breaks. 3-5 hashtags max.",
+    },
     Platform.facebook_ads: {
         "max_chars": 125,
         "recommended_chars": 90,
