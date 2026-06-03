@@ -2,7 +2,7 @@
 
 import type { Platform } from "@/types";
 import {
-  Instagram, Facebook, Video, Target, Search,
+  Instagram, Facebook, Video, Target, Search, Linkedin,
   Mail, Users, Zap, ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -19,6 +19,7 @@ const PLATFORMS: { value: Platform; label: string; icon: React.ReactNode; color:
   { value: "instagram",    label: "Instagram",     icon: <Instagram className="h-4 w-4" />,  color: "from-purple-500 to-pink-500" },
   { value: "facebook",     label: "Facebook",      icon: <Facebook className="h-4 w-4" />,   color: "from-blue-600 to-blue-500" },
   { value: "tiktok",       label: "TikTok",        icon: <Video className="h-4 w-4" />,      color: "from-gray-900 to-gray-700" },
+  { value: "linkedin",     label: "LinkedIn",      icon: <Linkedin className="h-4 w-4" />,   color: "from-blue-700 to-blue-600" },
   { value: "facebook_ads", label: "Facebook Ads",  icon: <Target className="h-4 w-4" />,     color: "from-blue-700 to-blue-600" },
   { value: "google_ads",   label: "Google Ads",    icon: <Search className="h-4 w-4" />,     color: "from-green-600 to-green-500" },
 ];
