@@ -470,11 +470,11 @@ async def generate_image(
     # ── Step 2: Pick image size based on platform ─────────────────────────────
     _PLATFORM_SIZE: dict[str, str] = {
         "instagram":    "1024x1024",   # 1:1 square — standard Instagram feed
-        "tiktok":       "1024x1792",   # 9:16 portrait — TikTok / Stories
-        "facebook":     "1792x1024",   # 16:9 landscape — Facebook feed / link
-        "linkedin":     "1792x1024",   # 16:9 landscape — LinkedIn article/post
-        "facebook_ads": "1792x1024",   # 16:9 landscape — ad creatives
-        "google_ads":   "1792x1024",   # 16:9 landscape — display ads
+        "tiktok":       "1024x1536",   # portrait — TikTok / Stories
+        "facebook":     "1536x1024",   # landscape — Facebook feed / link
+        "linkedin":     "1536x1024",   # landscape — LinkedIn article/post
+        "facebook_ads": "1536x1024",   # landscape — ad creatives
+        "google_ads":   "1536x1024",   # landscape — display ads
     }
     image_size = _PLATFORM_SIZE.get(item.platform.value, "1024x1024")
 
