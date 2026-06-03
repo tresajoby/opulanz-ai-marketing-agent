@@ -258,7 +258,17 @@ class BrandContextAgent:
             "---VARIANT [SHORT|MEDIUM|LONG]---\n"
             "[post text here]\n"
             "HASHTAGS: [hashtags here or NONE]\n"
-            "IMAGE_PROMPT: [DALL-E prompt for a matching image]\n"
+            "IMAGE_PROMPT: [Write a highly detailed DALL-E 3 prompt (minimum 80 words). "
+            "Include ALL of the following: "
+            "(1) Exact scene — specific setting, environment, objects, surfaces, background elements; "
+            "(2) Visual style — photorealistic editorial photography OR cinematic illustration; "
+            "(3) Lighting — e.g. soft golden-hour natural light, dramatic studio lighting, airy bright daylight; "
+            "(4) Color palette — explicitly name the brand colors from the context and how they appear in the scene; "
+            "(5) Mood and atmosphere — premium, aspirational, trustworthy, energetic, etc.; "
+            "(6) Composition — close-up product shot, wide lifestyle scene, flat-lay, birds-eye, etc.; "
+            "(7) Subject details — textures, materials, finishes, any people (age, style, emotion); "
+            "(8) Brand alignment — visual elements that reflect the brand identity and target audience. "
+            "Do NOT include any text, words, logos, or watermarks in the image.]\n"
             "---END VARIANT---\n"
         )
 

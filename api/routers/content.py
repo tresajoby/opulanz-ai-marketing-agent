@@ -20,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import anthropic
 import openai
 
 from ..database import get_db
@@ -390,7 +391,9 @@ async def generate_image(
         UserRole.super_admin, UserRole.marketing_manager, UserRole.content_creator
     )),
 ):
-    """Generate a DALL-E 3 image from the content item's image_prompt and save the URL."""
+    """Generate a DALL-E 3 image from the content item's image_prompt.
+    Claude Haiku first expands the prompt with brand visual details before calling DALL-E.
+    """
     item = await _get_content_or_404(item_id, db)
 
     if not item.image_prompt:
@@ -399,11 +402,64 @@ async def generate_image(
     if not settings.openai_api_key:
         raise HTTPException(status_code=500, detail="OPENAI_API_KEY is not configured on the server.")
 
+    # ── Step 1: Expand the prompt with Claude Haiku ───────────────────────────
+    final_prompt = item.image_prompt
+    if settings.anthropic_api_key:
+        try:
+            # Pull brand visual context for prompt enrichment
+            from ..models.brand import Brand
+            brand_res = await db.execute(select(Brand).where(Brand.id == item.brand_id))
+            brand = brand_res.scalar_one_or_none()
+
+            brand_visuals = ""
+            if brand:
+                parts = [f"Brand: {brand.name}"]
+                if brand.tagline:
+                    parts.append(f"Tagline: {brand.tagline}")
+                if brand.color_palette:
+                    colors = ", ".join(f"{k}: {v}" for k, v in brand.color_palette.items())
+                    parts.append(f"Brand colors: {colors}")
+                if brand.website_url:
+                    parts.append(f"Website: {brand.website_url}")
+                if brand.tone_of_voice:
+                    parts.append(f"Brand personality: {brand.tone_of_voice}")
+                brand_visuals = "\n".join(parts)
+
+            claude = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+            expansion = await claude.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=400,
+                messages=[{
+                    "role": "user",
+                    "content": (
+                        f"You are a professional art director. Expand this image prompt into a "
+                        f"rich, detailed DALL-E 3 prompt (max 350 words).\n\n"
+                        f"Original prompt:\n{item.image_prompt}\n\n"
+                        f"Post content:\n{item.text_body[:300]}\n\n"
+                        f"Brand context:\n{brand_visuals}\n\n"
+                        f"Rules:\n"
+                        f"- Incorporate the brand colors explicitly into the scene\n"
+                        f"- Describe exact lighting, composition, camera angle\n"
+                        f"- Add rich texture and material details\n"
+                        f"- Match the brand's visual identity and target audience\n"
+                        f"- Photorealistic editorial style unless brand is illustrative\n"
+                        f"- NO text, NO logos, NO watermarks in the image\n"
+                        f"- Output only the final prompt, nothing else"
+                    ),
+                }],
+            )
+            expanded = expansion.content[0].text.strip()
+            if expanded:
+                final_prompt = expanded
+        except Exception as e:
+            print(f"[OMMA] Prompt expansion failed, using original: {e}")
+
+    # ── Step 2: Call DALL-E with the enriched prompt ──────────────────────────
     try:
         client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
         response = await client.images.generate(
             model=settings.dalle_model,
-            prompt=item.image_prompt,
+            prompt=final_prompt,
             size="1024x1024",
             n=1,
         )

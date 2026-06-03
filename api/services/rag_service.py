@@ -158,6 +158,11 @@ class RAGService:
             lines.append(f"Tagline: {brand.tagline}")
         if brand.tone_of_voice:
             lines.append(f"Tone of voice: {brand.tone_of_voice}")
+        if brand.color_palette:
+            colors = ", ".join(f"{k}: {v}" for k, v in brand.color_palette.items())
+            lines.append(f"Brand colors: {colors}")
+        if brand.website_url:
+            lines.append(f"Brand website: {brand.website_url}")
 
         if products:
             lines.append("\n--- PRODUCTS ---")
