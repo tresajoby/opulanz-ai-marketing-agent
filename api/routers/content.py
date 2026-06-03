@@ -426,6 +426,17 @@ async def generate_image(
                 brand_visuals = "\n".join(parts)
 
             claude = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+            platform = item.platform.value
+            aspect_notes = {
+                "instagram":    "square 1:1 format — centred composition, no important content near edges",
+                "tiktok":       "vertical 9:16 portrait format — tall composition, subject centred vertically",
+                "facebook":     "horizontal 16:9 landscape format — wide scene with breathing room on sides",
+                "linkedin":     "horizontal 16:9 landscape format — professional, wide editorial composition",
+                "facebook_ads": "horizontal 16:9 landscape format — bold, high-contrast ad creative",
+                "google_ads":   "horizontal 16:9 landscape format — clean, minimal display ad style",
+            }
+            aspect_hint = aspect_notes.get(platform, "square 1:1 format")
+
             expansion = await claude.messages.create(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=400,
@@ -434,10 +445,12 @@ async def generate_image(
                     "content": (
                         f"You are a professional art director. Expand this image prompt into a "
                         f"rich, detailed DALL-E 3 prompt (max 350 words).\n\n"
+                        f"Platform: {platform} — {aspect_hint}\n\n"
                         f"Original prompt:\n{item.image_prompt}\n\n"
                         f"Post content:\n{item.text_body[:300]}\n\n"
                         f"Brand context:\n{brand_visuals}\n\n"
                         f"Rules:\n"
+                        f"- Compose specifically for {aspect_hint}\n"
                         f"- Incorporate the brand colors explicitly into the scene\n"
                         f"- Describe exact lighting, composition, camera angle\n"
                         f"- Add rich texture and material details\n"
@@ -454,13 +467,24 @@ async def generate_image(
         except Exception as e:
             print(f"[OMMA] Prompt expansion failed, using original: {e}")
 
-    # ── Step 2: Call DALL-E with the enriched prompt ──────────────────────────
+    # ── Step 2: Pick image size based on platform ─────────────────────────────
+    _PLATFORM_SIZE: dict[str, str] = {
+        "instagram":    "1024x1024",   # 1:1 square — standard Instagram feed
+        "tiktok":       "1024x1792",   # 9:16 portrait — TikTok / Stories
+        "facebook":     "1792x1024",   # 16:9 landscape — Facebook feed / link
+        "linkedin":     "1792x1024",   # 16:9 landscape — LinkedIn article/post
+        "facebook_ads": "1792x1024",   # 16:9 landscape — ad creatives
+        "google_ads":   "1792x1024",   # 16:9 landscape — display ads
+    }
+    image_size = _PLATFORM_SIZE.get(item.platform.value, "1024x1024")
+
+    # ── Step 3: Call DALL-E with the enriched prompt ──────────────────────────
     try:
         client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
         response = await client.images.generate(
             model=settings.dalle_model,
             prompt=final_prompt,
-            size="1024x1024",
+            size=image_size,
             n=1,
         )
     except openai.AuthenticationError:
