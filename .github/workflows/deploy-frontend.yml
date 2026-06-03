@@ -20,6 +20,6 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: upload
           app_location: web
-          output_location: .next
+          output_location: ""
         env:
           NEXT_PUBLIC_API_URL: https://omma-prod-api.orangetree-ce90bec0.francecentral.azurecontainerapps.io
