@@ -458,21 +458,22 @@ async def generate_image(
                 messages=[{
                     "role": "user",
                     "content": (
-                        f"You are a professional art director. Expand this image prompt into a "
-                        f"rich, detailed DALL-E 3 prompt (max 350 words).\n\n"
+                        f"You are a world-class art director specialising in brand visual identity. "
+                        f"Expand this image prompt into a rich, detailed DALL-E 3 prompt (max 350 words).\n\n"
                         f"Platform: {platform} — {aspect_hint}\n\n"
                         f"Original prompt:\n{item.image_prompt}\n\n"
                         f"Post content:\n{item.text_body[:300]}\n\n"
                         f"Brand context:\n{brand_visuals}\n\n"
-                        f"Rules:\n"
-                        f"- Compose specifically for {aspect_hint}\n"
-                        f"- Incorporate the brand colors explicitly into the scene\n"
-                        f"- Describe exact lighting, composition, camera angle\n"
-                        f"- Add rich texture and material details\n"
-                        f"- Match the brand's visual identity and target audience\n"
-                        f"- Photorealistic editorial style unless brand is illustrative\n"
-                        f"- NO text, NO logos, NO watermarks in the image\n"
-                        f"- Output only the final prompt, nothing else"
+                        f"STRICT RULES — follow every one:\n"
+                        f"1. NO humans, NO faces, NO hands, NO body parts — focus 100% on the service, product, or brand concept\n"
+                        f"2. Incorporate the brand colors explicitly — name them and describe where they appear\n"
+                        f"3. Reference visual elements that echo the brand's logo style (shapes, geometry, patterns) without reproducing text\n"
+                        f"4. Choose a creative, unexpected visual concept — avoid clichés like generic coins, handshakes, or office stock photos\n"
+                        f"5. Describe the exact lighting setup, camera angle, and composition for {aspect_hint}\n"
+                        f"6. Add rich material details — textures, reflections, depth, surfaces\n"
+                        f"7. The mood must feel premium, on-brand, and aspirational\n"
+                        f"8. NO text, NO words, NO logos, NO watermarks anywhere in the image\n"
+                        f"9. Output only the final prompt — no explanations, no preamble"
                     ),
                 }],
             )
