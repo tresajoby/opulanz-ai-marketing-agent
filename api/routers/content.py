@@ -136,20 +136,23 @@ async def generate_content(
     queue_ids: list[int] = []
     all_warnings: list[str] = []
 
-    for variant in result.variants:
-        # Run compliance check on each variant
-        compliance = await compliance_agent.check(
+    # Run all compliance checks in parallel to save time
+    import asyncio as _asyncio
+    compliance_results = await _asyncio.gather(*[
+        compliance_agent.check(
             db=db,
             brand_id=body.brand_id,
             platform=body.platform,
             text=variant.text_body,
         )
+        for variant in result.variants
+    ])
 
+    for variant, compliance in zip(result.variants, compliance_results):
         warnings = [i.detail for i in compliance.issues]
         all_warnings.extend(warnings)
 
         if not compliance.passed:
-            # Hard failure — log and skip this variant
             await _write_audit(db, current_user.id, "content_generation", "compliance_blocked", {
                 "brand_id": body.brand_id,
                 "platform": body.platform.value,
