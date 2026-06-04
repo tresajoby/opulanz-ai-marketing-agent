@@ -381,6 +381,21 @@ async def publish_content(
     }
 
 
+# ─── Delete content item ─────────────────────────────────────────────────────
+
+@router.delete("/{item_id}", status_code=status.HTTP_200_OK)
+async def delete_content(
+    item_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.super_admin, UserRole.marketing_manager, UserRole.content_creator)),
+):
+    """Permanently delete a content item and its approval queue entry."""
+    item = await _get_content_or_404(item_id, db)
+    await db.delete(item)
+    await db.commit()
+    return {"message": f"Content item {item_id} deleted."}
+
+
 # ─── Image generation ─────────────────────────────────────────────────────────
 
 @router.post("/{item_id}/generate-image", status_code=status.HTTP_200_OK)

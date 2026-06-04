@@ -18,6 +18,7 @@ import {
   Hash,
   ImageIcon,
   Rocket,
+  Trash2,
 } from "lucide-react";
 import type { ApprovalQueueItem } from "@/types";
 
@@ -79,6 +80,17 @@ export function ApprovalCard({ item, onAction }: ApprovalCardProps) {
     } finally { setLoading(false); }
   }
 
+  async function handleDelete() {
+    if (!confirm("Delete this content item? This cannot be undone.")) return;
+    setLoading(true); setError(null);
+    try {
+      await contentApi.delete(ci.id);
+      onAction();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to delete.");
+    } finally { setLoading(false); }
+  }
+
   const confidenceScore = ci.ai_confidence_score ?? null;
   const complianceScore = ci.generation_metadata?.compliance_score as number | null ?? null;
   const variantLabel = ci.generation_metadata?.variant_label as string ?? "";
@@ -101,6 +113,14 @@ export function ApprovalCard({ item, onAction }: ApprovalCardProps) {
             <Clock className="h-3.5 w-3.5" />
             {formatDate(item.requested_at)}
           </span>
+          <button
+            onClick={handleDelete}
+            disabled={loading}
+            className="flex items-center gap-1 text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50"
+            title="Delete"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
         </div>
       </div>
 

@@ -148,6 +148,8 @@ export const contentApi = {
     }),
   publish: (id: number) =>
     request(`/api/content/${id}/publish`, { method: "POST" }),
+  delete: (id: number) =>
+    request(`/api/content/${id}`, { method: "DELETE" }),
   generateImage: (id: number) =>
     request<{ image_url: string; content_item_id: number }>(
       `/api/content/${id}/generate-image`,
