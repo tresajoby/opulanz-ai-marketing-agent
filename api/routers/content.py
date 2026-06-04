@@ -480,7 +480,7 @@ async def generate_image(
                         f"STRICT RULES — follow every one:\n"
                         f"1. NO humans, NO faces, NO hands, NO body parts — focus 100% on the service, product, or brand concept\n"
                         f"2. Incorporate the brand colors explicitly — name them and describe where they appear\n"
-                        f"3. {'A brand logo reference image is provided — describe how its shapes, geometry, and mark are echoed or integrated as a design element in the scene (as an embossed seal, frosted glass emblem, metallic icon, glowing symbol, etc.)' if logo_url else 'Reference visual elements that echo the brand logo style without reproducing text'}\n"
+                        f"3. {'THE BRAND LOGO IS PROVIDED AS A REFERENCE IMAGE alongside this prompt. Instruct DALL-E to incorporate the logo mark as a prominent design element — rendered as an embossed seal on a surface, a frosted-glass emblem, a metallic icon, an illuminated symbol, or integrated into the scene geometry. It must be clearly visible and recognisable.' if logo_url else 'Reference visual elements that echo the brand logo style without reproducing text'}\n"
                         f"4. Choose a creative, unexpected visual concept — avoid clichés like generic coins, handshakes, or office stock photos\n"
                         f"5. Describe the exact lighting setup, camera angle, and composition for {aspect_hint}\n"
                         f"6. Add rich material details — textures, reflections, depth, surfaces\n"
@@ -513,20 +513,29 @@ async def generate_image(
 
         # gpt-image-1 supports a reference image to guide visual style
         if logo_url and settings.dalle_model == "gpt-image-1":
-            import httpx, base64
+            import httpx, base64 as _b64
             try:
-                async with httpx.AsyncClient(timeout=10) as _http:
-                    _r = await _http.get(logo_url)
-                img_b64 = base64.b64encode(_r.content).decode()
+                # logo_url is either a data: URL (uploaded file) or an HTTP URL (favicon)
+                if logo_url.startswith("data:"):
+                    # Already base64 — use directly
+                    ref_image = logo_url
+                else:
+                    # Fetch from HTTP URL and convert to base64
+                    async with httpx.AsyncClient(timeout=10) as _http:
+                        _r = await _http.get(logo_url)
+                    img_b64 = _b64.b64encode(_r.content).decode()
+                    ref_image = f"data:image/png;base64,{img_b64}"
+
+                print(f"[OMMA] Using logo reference image for brand {item.brand_id}")
                 response = await client.images.generate(
                     model=settings.dalle_model,
                     prompt=final_prompt,
                     size=image_size,
                     n=1,
-                    image=f"data:image/png;base64,{img_b64}",
+                    image=ref_image,
                 )
             except Exception as logo_err:
-                print(f"[OMMA] Logo reference failed, generating without it: {logo_err}")
+                print(f"[OMMA] Logo reference failed ({logo_err}), generating without it")
                 response = await client.images.generate(
                     model=settings.dalle_model,
                     prompt=final_prompt,
