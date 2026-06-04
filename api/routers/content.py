@@ -427,6 +427,7 @@ async def generate_image(
             brand = brand_res.scalar_one_or_none()
 
             brand_visuals = ""
+            logo_url: str | None = None
             if brand:
                 parts = [f"Brand: {brand.name}"]
                 if brand.tagline:
@@ -436,6 +437,14 @@ async def generate_image(
                     parts.append(f"Brand colors: {colors}")
                 if brand.website_url:
                     parts.append(f"Website: {brand.website_url}")
+                    # Fetch logo via Google's favicon service (256px, reliable)
+                    try:
+                        from urllib.parse import urlparse
+                        domain = urlparse(brand.website_url).netloc or brand.website_url.split("/")[0]
+                        logo_url = f"https://www.google.com/s2/favicons?domain={domain}&sz=256"
+                        parts.append(f"Brand logo available as reference — incorporate its visual style and mark into the scene")
+                    except Exception:
+                        pass
                 if brand.tone_of_voice:
                     parts.append(f"Brand personality: {brand.tone_of_voice}")
                 brand_visuals = "\n".join(parts)
@@ -467,12 +476,12 @@ async def generate_image(
                         f"STRICT RULES — follow every one:\n"
                         f"1. NO humans, NO faces, NO hands, NO body parts — focus 100% on the service, product, or brand concept\n"
                         f"2. Incorporate the brand colors explicitly — name them and describe where they appear\n"
-                        f"3. Reference visual elements that echo the brand's logo style (shapes, geometry, patterns) without reproducing text\n"
+                        f"3. {'A brand logo reference image is provided — describe how its shapes, geometry, and mark are echoed or integrated as a design element in the scene (as an embossed seal, frosted glass emblem, metallic icon, glowing symbol, etc.)' if logo_url else 'Reference visual elements that echo the brand logo style without reproducing text'}\n"
                         f"4. Choose a creative, unexpected visual concept — avoid clichés like generic coins, handshakes, or office stock photos\n"
                         f"5. Describe the exact lighting setup, camera angle, and composition for {aspect_hint}\n"
                         f"6. Add rich material details — textures, reflections, depth, surfaces\n"
                         f"7. The mood must feel premium, on-brand, and aspirational\n"
-                        f"8. NO text, NO words, NO logos, NO watermarks anywhere in the image\n"
+                        f"8. NO text, NO words, NO watermarks anywhere in the image\n"
                         f"9. Output only the final prompt — no explanations, no preamble"
                     ),
                 }],
@@ -494,15 +503,39 @@ async def generate_image(
     }
     image_size = _PLATFORM_SIZE.get(item.platform.value, "1024x1024")
 
-    # ── Step 3: Call DALL-E with the enriched prompt ──────────────────────────
+    # ── Step 3: Call DALL-E with the enriched prompt (+ logo reference if available) ──
     try:
         client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
-        response = await client.images.generate(
-            model=settings.dalle_model,
-            prompt=final_prompt,
-            size=image_size,
-            n=1,
-        )
+
+        # gpt-image-1 supports a reference image to guide visual style
+        if logo_url and settings.dalle_model == "gpt-image-1":
+            import httpx, base64
+            try:
+                async with httpx.AsyncClient(timeout=10) as _http:
+                    _r = await _http.get(logo_url)
+                img_b64 = base64.b64encode(_r.content).decode()
+                response = await client.images.generate(
+                    model=settings.dalle_model,
+                    prompt=final_prompt,
+                    size=image_size,
+                    n=1,
+                    image=f"data:image/png;base64,{img_b64}",
+                )
+            except Exception as logo_err:
+                print(f"[OMMA] Logo reference failed, generating without it: {logo_err}")
+                response = await client.images.generate(
+                    model=settings.dalle_model,
+                    prompt=final_prompt,
+                    size=image_size,
+                    n=1,
+                )
+        else:
+            response = await client.images.generate(
+                model=settings.dalle_model,
+                prompt=final_prompt,
+                size=image_size,
+                n=1,
+            )
     except openai.AuthenticationError:
         raise HTTPException(status_code=500, detail="OpenAI authentication failed — check OPENAI_API_KEY in server env vars.")
     except openai.RateLimitError:
