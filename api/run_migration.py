@@ -11,7 +11,11 @@ async def main():
     engine = create_async_engine(url)
     async with engine.begin() as conn:
         await conn.execute(text("ALTER TYPE platform ADD VALUE IF NOT EXISTS 'linkedin'"))
-        print("Migration complete: added 'linkedin' to platform enum.")
+        print("✓ Added 'linkedin' to platform enum.")
+        await conn.execute(text(
+            "ALTER TABLE brands ADD COLUMN IF NOT EXISTS logo_url TEXT"
+        ))
+        print("✓ Added logo_url column to brands table.")
     await engine.dispose()
 
 
