@@ -151,10 +151,14 @@ export function ChatWindow() {
       });
 
       let items: ApprovalQueueItem[] = [];
-      if (result.approval_queue_ids?.length > 0) {
-        const allQueue = await contentApi.queue(Number(brandId));
-        items = allQueue.filter((q) => result.approval_queue_ids.includes(q.id));
-        if (items.length === 0) items = allQueue.slice(0, result.items_created);
+      try {
+        if (result.approval_queue_ids?.length > 0) {
+          const allQueue = await contentApi.queue(Number(brandId));
+          items = allQueue.filter((q) => result.approval_queue_ids.includes(q.id));
+          if (items.length === 0) items = allQueue.slice(0, result.items_created);
+        }
+      } catch {
+        // Queue fetch failed — generation still succeeded
       }
 
       const assistantContent = buildAssistantHistoryContent(items, cardPlatform);
@@ -216,11 +220,17 @@ export function ChatWindow() {
         conversation_history: updatedHistory,
       });
 
+      // Fetch queue items to display cards — wrapped in try/catch so a queue
+      // fetch failure doesn't hide the fact that generation succeeded
       let items: ApprovalQueueItem[] = [];
-      if (result.approval_queue_ids?.length > 0) {
-        const allQueue = await contentApi.queue(Number(brandId));
-        items = allQueue.filter((q) => result.approval_queue_ids.includes(q.id));
-        if (items.length === 0) items = allQueue.slice(0, result.items_created);
+      try {
+        if (result.approval_queue_ids?.length > 0) {
+          const allQueue = await contentApi.queue(Number(brandId));
+          items = allQueue.filter((q) => result.approval_queue_ids.includes(q.id));
+          if (items.length === 0) items = allQueue.slice(0, result.items_created);
+        }
+      } catch {
+        // Queue fetch failed — cards won't show but generation did succeed
       }
 
       // Append assistant turn so next message has full context
@@ -240,9 +250,9 @@ export function ChatWindow() {
       // Keep queue in sync
       qc.invalidateQueries({ queryKey: ["queue"] });
     } catch (err: unknown) {
-      const text = err instanceof Error ? err.message : "Something went wrong. Please try again.";
+      const errText = err instanceof Error ? err.message : "Something went wrong. Please try again.";
       const sysMsg: SystemMessage = {
-        id: newId(), role: "system", text, variant: "error", timestamp: new Date(),
+        id: newId(), role: "system", text: errText, variant: "error", timestamp: new Date(),
       };
       setMessages((prev) => prev.map((m) => (m.id === thinkingId ? sysMsg : m)));
     } finally {
