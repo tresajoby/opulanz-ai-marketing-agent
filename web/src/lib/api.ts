@@ -132,7 +132,7 @@ export const contentApi = {
     request<GenerateResponse>("/api/content/generate", {
       method: "POST",
       body: JSON.stringify(data),
-    }),
+    }, 120_000),
   queue: (brandId?: number) => {
     const qs = brandId ? `?brand_id=${brandId}` : "";
     return request<ApprovalQueueItem[]>(`/api/content/queue${qs}`);
