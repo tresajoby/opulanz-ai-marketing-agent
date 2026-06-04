@@ -507,48 +507,15 @@ async def generate_image(
     }
     image_size = _PLATFORM_SIZE.get(item.platform.value, "1024x1024")
 
-    # ── Step 3: Call DALL-E with the enriched prompt (+ logo reference if available) ──
+    # ── Step 3: Generate image with DALL-E ────────────────────────────────────
     try:
         client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
-
-        # gpt-image-1 supports a reference image to guide visual style
-        if logo_url and settings.dalle_model == "gpt-image-1":
-            import httpx, base64 as _b64
-            try:
-                # logo_url is either a data: URL (uploaded file) or an HTTP URL (favicon)
-                if logo_url.startswith("data:"):
-                    # Already base64 — use directly
-                    ref_image = logo_url
-                else:
-                    # Fetch from HTTP URL and convert to base64
-                    async with httpx.AsyncClient(timeout=10) as _http:
-                        _r = await _http.get(logo_url)
-                    img_b64 = _b64.b64encode(_r.content).decode()
-                    ref_image = f"data:image/png;base64,{img_b64}"
-
-                print(f"[OMMA] Using logo reference image for brand {item.brand_id}")
-                response = await client.images.generate(
-                    model=settings.dalle_model,
-                    prompt=final_prompt,
-                    size=image_size,
-                    n=1,
-                    image=ref_image,
-                )
-            except Exception as logo_err:
-                print(f"[OMMA] Logo reference failed ({logo_err}), generating without it")
-                response = await client.images.generate(
-                    model=settings.dalle_model,
-                    prompt=final_prompt,
-                    size=image_size,
-                    n=1,
-                )
-        else:
-            response = await client.images.generate(
-                model=settings.dalle_model,
-                prompt=final_prompt,
-                size=image_size,
-                n=1,
-            )
+        response = await client.images.generate(
+            model=settings.dalle_model,
+            prompt=final_prompt,
+            size=image_size,
+            n=1,
+        )
     except openai.AuthenticationError:
         raise HTTPException(status_code=500, detail="OpenAI authentication failed — check OPENAI_API_KEY in server env vars.")
     except openai.RateLimitError:
@@ -560,11 +527,72 @@ async def generate_image(
 
     img = response.data[0]
     if img.url:
-        image_url = img.url
+        raw_url = img.url
     elif img.b64_json:
-        image_url = f"data:image/png;base64,{img.b64_json}"
+        raw_url = f"data:image/png;base64,{img.b64_json}"
     else:
         raise HTTPException(status_code=500, detail="OpenAI returned no image data.")
+
+    # ── Step 4: Composite the brand logo onto the generated image ─────────────
+    image_url = raw_url
+    if logo_url:
+        try:
+            import base64, io, httpx
+            from PIL import Image as PILImage
+
+            # Load generated image
+            if raw_url.startswith("data:"):
+                _, b64data = raw_url.split(",", 1)
+                base_bytes = base64.b64decode(b64data)
+            else:
+                async with httpx.AsyncClient(timeout=20) as _http:
+                    base_bytes = (await _http.get(raw_url)).content
+            base_img = PILImage.open(io.BytesIO(base_bytes)).convert("RGBA")
+
+            # Load brand logo
+            if logo_url.startswith("data:"):
+                _, b64data = logo_url.split(",", 1)
+                logo_bytes = base64.b64decode(b64data)
+            else:
+                async with httpx.AsyncClient(timeout=10) as _http:
+                    logo_bytes = (await _http.get(logo_url)).content
+            logo_img = PILImage.open(io.BytesIO(logo_bytes)).convert("RGBA")
+
+            # Resize logo to 18% of image width, keep aspect ratio
+            img_w, img_h = base_img.size
+            logo_target_w = int(img_w * 0.18)
+            logo_ratio = logo_img.height / logo_img.width
+            logo_target_h = int(logo_target_w * logo_ratio)
+            logo_img = logo_img.resize((logo_target_w, logo_target_h), PILImage.LANCZOS)
+
+            # Add white circular background behind logo for visibility
+            padding = int(logo_target_w * 0.25)
+            circle_size = logo_target_w + padding * 2
+            circle = PILImage.new("RGBA", (circle_size, circle_size), (0, 0, 0, 0))
+            from PIL import ImageDraw
+            draw = ImageDraw.Draw(circle)
+            draw.ellipse([0, 0, circle_size, circle_size], fill=(255, 255, 255, 210))
+            logo_offset_x = (circle_size - logo_target_w) // 2
+            logo_offset_y = (circle_size - logo_target_h) // 2
+            circle.paste(logo_img, (logo_offset_x, logo_offset_y), logo_img)
+
+            # Place in bottom-right corner
+            margin = int(img_w * 0.04)
+            x = img_w - circle_size - margin
+            y = img_h - circle_size - margin
+            base_img.paste(circle, (x, y), circle)
+
+            # Encode final image as base64 PNG
+            out = io.BytesIO()
+            base_img.convert("RGB").save(out, format="PNG")
+            out.seek(0)
+            final_b64 = base64.b64encode(out.read()).decode()
+            image_url = f"data:image/png;base64,{final_b64}"
+            print(f"[OMMA] Logo composited onto image for brand {item.brand_id}")
+        except Exception as comp_err:
+            print(f"[OMMA] Logo compositing failed ({comp_err}), using raw image")
+            image_url = raw_url
+
     item.image_url = image_url
     await db.commit()
 
