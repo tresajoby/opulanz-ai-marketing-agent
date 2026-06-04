@@ -14,6 +14,7 @@ class Brand(Base):
     tagline: Mapped[str | None] = mapped_column(String(500), nullable=True)
     tone_of_voice: Mapped[str | None] = mapped_column(Text, nullable=True)
     color_palette: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    logo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     website_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)

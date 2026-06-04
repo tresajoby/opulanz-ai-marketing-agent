@@ -435,16 +435,20 @@ async def generate_image(
                 if brand.color_palette:
                     colors = ", ".join(f"{k}: {v}" for k, v in brand.color_palette.items())
                     parts.append(f"Brand colors: {colors}")
-                if brand.website_url:
-                    parts.append(f"Website: {brand.website_url}")
-                    # Fetch logo via Google's favicon service (256px, reliable)
+                if brand.logo_url:
+                    logo_url = brand.logo_url
+                    parts.append("Brand logo available as reference — incorporate its visual style and mark into the scene")
+                elif brand.website_url:
+                    # Fall back to Google favicon if no logo uploaded
                     try:
                         from urllib.parse import urlparse
                         domain = urlparse(brand.website_url).netloc or brand.website_url.split("/")[0]
                         logo_url = f"https://www.google.com/s2/favicons?domain={domain}&sz=256"
-                        parts.append(f"Brand logo available as reference — incorporate its visual style and mark into the scene")
+                        parts.append("Brand logo available as reference — incorporate its visual style and mark into the scene")
                     except Exception:
                         pass
+                if brand.website_url:
+                    parts.append(f"Website: {brand.website_url}")
                 if brand.tone_of_voice:
                     parts.append(f"Brand personality: {brand.tone_of_voice}")
                 brand_visuals = "\n".join(parts)

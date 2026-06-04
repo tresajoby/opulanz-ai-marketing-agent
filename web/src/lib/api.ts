@@ -108,6 +108,21 @@ export const brandsApi = {
       method: "POST",
       body: JSON.stringify({ url }),
     }),
+  uploadLogo: async (id: number, file: File): Promise<Brand> => {
+    const token = getToken();
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${BASE}/api/brands/${id}/logo`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: `${res.status}` }));
+      throw new Error(err.detail ?? "Upload failed");
+    }
+    return res.json();
+  },
 };
 
 // ─── Content & Approval ───────────────────────────────────────────────────────

@@ -30,6 +30,7 @@ export interface Brand {
   tagline: string | null;
   tone_of_voice: string | null;
   color_palette: Record<string, string> | null;
+  logo_url: string | null;
   website_url: string | null;
   is_active: boolean;
   created_at: string;

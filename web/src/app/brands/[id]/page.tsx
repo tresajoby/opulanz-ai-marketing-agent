@@ -63,6 +63,15 @@ export default function BrandDetailPage() {
   return (
     <DashboardLayout title={brand ? `${brand.name} — Configuration` : "Brand Configuration"}>
       <div className="max-w-2xl space-y-5">
+        {/* Brand logo card */}
+        <BrandLogoCard
+          brandId={brandId}
+          logoUrl={brand?.logo_url ?? null}
+          brandName={brand?.name ?? ""}
+          onFlash={flash}
+          onSuccess={invalidateBrand}
+        />
+
         {/* Website auto-fetch card */}
         <WebsiteFetchCard
           brandId={brandId}
@@ -249,6 +258,87 @@ function SocialAccountsTab({
     </Card>
   );
 }
+
+// ─── Brand Logo Card ──────────────────────────────────────────────────────────
+
+function BrandLogoCard({
+  brandId,
+  logoUrl,
+  brandName,
+  onFlash,
+  onSuccess,
+}: {
+  brandId: number;
+  logoUrl: string | null;
+  brandName: string;
+  onFlash: (t: "success" | "error", m: string) => void;
+  onSuccess: () => void;
+}) {
+  const [loading, setLoading] = useState(false);
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setLoading(true);
+    try {
+      await brandsApi.uploadLogo(brandId, file);
+      onSuccess();
+      onFlash("success", "Logo uploaded successfully.");
+    } catch (err: unknown) {
+      onFlash("error", err instanceof Error ? err.message : "Upload failed.");
+    } finally {
+      setLoading(false);
+      e.target.value = "";
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Package className="h-4 w-4 text-indigo-600" />
+          <h3 className="font-semibold text-gray-900">Brand Logo</h3>
+        </div>
+        <p className="text-xs text-gray-500 mt-1">
+          Used as a visual reference when generating images for this brand.
+        </p>
+      </CardHeader>
+      <CardBody>
+        <div className="flex items-center gap-5">
+          {/* Logo preview */}
+          <div className="h-20 w-20 rounded-xl border-2 border-dashed border-gray-300 flex items-center justify-center bg-gray-50 shrink-0 overflow-hidden">
+            {logoUrl ? (
+              <img src={logoUrl} alt={`${brandName} logo`} className="h-full w-full object-contain p-1" />
+            ) : (
+              <span className="text-xs text-gray-400 text-center px-1">No logo</span>
+            )}
+          </div>
+
+          {/* Upload button */}
+          <div className="space-y-2">
+            <label className={`flex items-center gap-2 cursor-pointer px-4 py-2 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 text-sm font-medium hover:bg-indigo-100 transition-colors ${loading ? "opacity-50 pointer-events-none" : ""}`}>
+              {loading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Package className="h-4 w-4" />
+              )}
+              {logoUrl ? "Replace logo" : "Upload logo"}
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleFile}
+                disabled={loading}
+              />
+            </label>
+            <p className="text-xs text-gray-400">PNG, JPG, SVG or WebP — max 2 MB</p>
+          </div>
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
 
 // ─── Website Fetch Card ───────────────────────────────────────────────────────
 

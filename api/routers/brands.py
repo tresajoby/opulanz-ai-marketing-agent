@@ -25,6 +25,7 @@ class BrandCreate(BaseModel):
     tagline: str | None = None
     tone_of_voice: str | None = None
     color_palette: dict | None = None
+    logo_url: str | None = None
     website_url: str | None = None
 
 
@@ -34,6 +35,7 @@ class BrandOut(BaseModel):
     tagline: str | None
     tone_of_voice: str | None
     color_palette: dict | None
+    logo_url: str | None
     website_url: str | None
     is_active: bool
     created_at: datetime
@@ -151,6 +153,36 @@ async def update_brand(
     brand = await _get_brand_or_404(brand_id, db)
     for field, value in body.model_dump(exclude_none=True).items():
         setattr(brand, field, value)
+    await db.commit()
+    await db.refresh(brand)
+    return brand
+
+
+# ─── Logo upload ─────────────────────────────────────────────────────────────
+
+@router.post("/{brand_id}/logo", response_model=BrandOut)
+async def upload_logo(
+    brand_id: int,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.super_admin, UserRole.marketing_manager)),
+):
+    """Upload a brand logo. Stored as a base64 data URL in the database."""
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="File must be an image (PNG, JPG, SVG, etc.).")
+
+    result = await db.execute(select(Brand).where(Brand.id == brand_id))
+    brand = result.scalar_one_or_none()
+    if not brand:
+        raise HTTPException(status_code=404, detail="Brand not found.")
+
+    import base64
+    content = await file.read()
+    if len(content) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Logo must be under 2 MB.")
+
+    b64 = base64.b64encode(content).decode()
+    brand.logo_url = f"data:{file.content_type};base64,{b64}"
     await db.commit()
     await db.refresh(brand)
     return brand
