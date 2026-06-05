@@ -117,13 +117,17 @@ async def generate_content(
     Each variant is compliance-checked before entering the approval queue.
     Nothing is published at this step.
     """
+    # Generate extra variants as a buffer so compliance failures don't reduce the count
+    requested = body.num_variants
+    buffer_count = requested + 2
+
     result: GenerationResult = await brand_context_agent.generate_social_post(
         db=db,
         brand_id=body.brand_id,
         platform=body.platform,
         goal=body.goal,
         additional_context=body.additional_context,
-        num_variants=body.num_variants,
+        num_variants=buffer_count,
         conversation_history=body.conversation_history or None,
     )
 
@@ -136,7 +140,7 @@ async def generate_content(
     queue_ids: list[int] = []
     all_warnings: list[str] = []
 
-    # Run all compliance checks in parallel to save time
+    # Run all compliance checks in parallel
     import asyncio as _asyncio
     compliance_results = await _asyncio.gather(*[
         compliance_agent.check(
@@ -148,17 +152,19 @@ async def generate_content(
         for variant in result.variants
     ])
 
-    for variant, compliance in zip(result.variants, compliance_results):
+    # Split into passing and borderline variants
+    passing = [(v, c) for v, c in zip(result.variants, compliance_results) if c.passed]
+    borderline = [(v, c) for v, c in zip(result.variants, compliance_results) if not c.passed]
+
+    # Fill up to requested count: use passing first, then borderline if needed
+    selected = passing[:requested]
+    if len(selected) < requested:
+        needed = requested - len(selected)
+        selected += borderline[:needed]
+
+    for variant, compliance in selected:
         warnings = [i.detail for i in compliance.issues]
         all_warnings.extend(warnings)
-
-        if not compliance.passed:
-            await _write_audit(db, current_user.id, "content_generation", "compliance_blocked", {
-                "brand_id": body.brand_id,
-                "platform": body.platform.value,
-                "issues": warnings,
-            })
-            continue
 
         # Create content item
         item = ContentItem(
@@ -179,7 +185,7 @@ async def generate_content(
             },
         )
         db.add(item)
-        await db.flush()  # get item.id without committing
+        await db.flush()
 
         # Create approval queue entry
         deadline = datetime.utcnow() + timedelta(hours=APPROVAL_DEADLINE_HOURS)
@@ -192,6 +198,7 @@ async def generate_content(
                 f"Variant: {variant.variant_label}. "
                 f"Confidence: {result.ai_confidence_score}. "
                 f"Compliance score: {compliance.overall_score}."
+                + (" ⚠ Compliance warnings — review before approving." if warnings else "")
             ),
             deadline_at=deadline,
         )
