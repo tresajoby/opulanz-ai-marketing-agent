@@ -415,6 +415,9 @@ async def generate_image(
 
     # ── Step 1: Expand the prompt with Claude Haiku ───────────────────────────
     final_prompt = item.image_prompt
+    slogan: str | None = None
+    logo_url: str | None = None
+    brand_name: str = ""
     if settings.anthropic_api_key:
         try:
             # Pull brand visual context for prompt enrichment
@@ -423,8 +426,8 @@ async def generate_image(
             brand = brand_res.scalar_one_or_none()
 
             brand_visuals = ""
-            logo_url: str | None = None
             if brand:
+                brand_name = brand.name
                 parts = [f"Brand: {brand.name}"]
                 if brand.tagline:
                     parts.append(f"Tagline: {brand.tagline}")
@@ -433,14 +436,11 @@ async def generate_image(
                     parts.append(f"Brand colors: {colors}")
                 if brand.logo_url:
                     logo_url = brand.logo_url
-                    parts.append("Brand logo available as reference — incorporate its visual style and mark into the scene")
                 elif brand.website_url:
-                    # Fall back to Google favicon if no logo uploaded
                     try:
                         from urllib.parse import urlparse
                         domain = urlparse(brand.website_url).netloc or brand.website_url.split("/")[0]
                         logo_url = f"https://www.google.com/s2/favicons?domain={domain}&sz=256"
-                        parts.append("Brand logo available as reference — incorporate its visual style and mark into the scene")
                     except Exception:
                         pass
                 if brand.website_url:
@@ -463,47 +463,50 @@ async def generate_image(
 
             expansion = await claude.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=400,
+                max_tokens=600,
                 messages=[{
                     "role": "user",
                     "content": (
-                        f"You are a senior digital marketing art director with 15 years of experience "
-                        f"creating scroll-stopping social media visuals that drive clicks, engagement, and sales.\n\n"
-                        f"Your task: expand this brief into a detailed DALL-E 3 prompt (max 400 words) that produces "
-                        f"an image so compelling that viewers STOP scrolling, READ the post, and CLICK to learn more.\n\n"
+                        f"You are a senior digital marketing art director creating scroll-stopping social media visuals.\n\n"
                         f"Platform: {platform} — {aspect_hint}\n"
-                        f"Post content (what the image must support):\n{item.text_body[:300]}\n\n"
+                        f"Post content:\n{item.text_body[:300]}\n\n"
                         f"Brand context:\n{brand_visuals}\n\n"
                         f"Original image brief:\n{item.image_prompt}\n\n"
-                        f"MARKETING PSYCHOLOGY RULES — apply all of them:\n"
-                        f"1. SCROLL-STOP ELEMENT: Open with the single most visually arresting element — "
-                        f"extreme contrast, unexpected scale, a visually surprising composition that creates instant curiosity\n"
-                        f"2. DESIRE TRIGGER: The scene must make the viewer feel they are MISSING OUT on something valuable. "
-                        f"Use aspirational settings, premium materials, beautiful lighting that says 'this could be yours'\n"
-                        f"3. PRODUCT/SERVICE AS HERO: Show the brand offering at its absolute best — "
-                        f"the most desirable angle, most flattering light, most aspirational context. "
-                        f"It must look like something worth clicking to learn about\n"
-                        f"4. EMOTIONAL HOOK: Choose exactly one emotional response to trigger: "
-                        f"FOMO (fear of missing out), DESIRE (I want this), CURIOSITY (what is that?), "
-                        f"TRUST (this looks professional and reliable), or EXCITEMENT (this is new and exciting). "
-                        f"Every element in the image must reinforce this single emotion\n"
-                        f"5. BRAND COLORS: Name the exact brand colors and describe precisely where they appear — "
-                        f"they must be prominent and intentional, not accidental\n"
-                        f"6. {'LOGO INTEGRATION: The brand logo reference is provided. Show it as a premium embossed surface detail, frosted glass emblem, metallic stamp, or illuminated icon — clearly visible, integrated naturally into the scene' if logo_url else 'BRAND IDENTITY: Echo the brand visual language through shapes, geometry, and design patterns'}\n"
-                        f"7. CINEMATIC QUALITY: Photorealistic editorial photography or premium CGI render. "
-                        f"Describe exact lighting ({aspect_hint} optimised), camera angle, depth of field, and surface textures. "
-                        f"Magazine cover quality. Ultra sharp.\n"
-                        f"8. PLATFORM COMPOSITION: Frame specifically for {aspect_hint} — "
-                        f"key visual elements positioned for maximum impact at this aspect ratio\n"
-                        f"9. NO text, NO words, NO logos as flat graphics, NO human faces, NO stock-photo clichés "
-                        f"(no handshakes, no pointing at screens, no generic office scenes)\n"
-                        f"10. Output only the final DALL-E prompt — no explanations, no preamble, no commentary"
+                        f"TASK: Return a JSON object with exactly two keys:\n"
+                        f"1. \"prompt\": A detailed DALL-E image prompt (max 350 words) following ALL rules below\n"
+                        f"2. \"slogan\": A short brand slogan (3-6 words, punchy and relevant to this specific post) "
+                        f"OR null if the post is informational/educational and a slogan would feel forced. "
+                        f"Use a slogan for: product launches, promotions, brand awareness, CTAs. "
+                        f"Skip it for: tips, news, thought leadership.\n\n"
+                        f"PROMPT RULES:\n"
+                        f"- SCROLL-STOP: One visually arresting element — extreme contrast, unexpected composition, instant curiosity\n"
+                        f"- DESIRE TRIGGER: Aspirational setting, premium materials, lighting that says 'this could be yours'\n"
+                        f"- PRODUCT AS HERO: Brand offering at its most desirable angle, most flattering context\n"
+                        f"- EMOTIONAL HOOK: Trigger exactly one of: FOMO / DESIRE / CURIOSITY / TRUST / EXCITEMENT\n"
+                        f"- BRAND COLORS: Name them explicitly, describe where they appear prominently\n"
+                        f"- LEAVE SPACE: The bottom 20% of the image should be slightly darker/simpler — "
+                        f"this area will have the brand logo and slogan overlaid on top\n"
+                        f"- CINEMATIC QUALITY: Editorial photography or premium CGI, ultra sharp, magazine-cover finish\n"
+                        f"- NO text, NO words, NO human faces, NO clichés (no handshakes, generic offices)\n"
+                        f"- Compose for {aspect_hint}\n\n"
+                        f"Return ONLY valid JSON, no markdown, no explanation."
                     ),
                 }],
             )
-            expanded = expansion.content[0].text.strip()
-            if expanded:
-                final_prompt = expanded
+            raw_expansion = expansion.content[0].text.strip()
+            if raw_expansion.startswith("```"):
+                raw_expansion = raw_expansion.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+            import json as _json
+            try:
+                expansion_data = _json.loads(raw_expansion)
+                if expansion_data.get("prompt"):
+                    final_prompt = expansion_data["prompt"]
+                slogan = expansion_data.get("slogan") or None
+            except Exception:
+                # If JSON parse fails, treat entire response as the prompt
+                if raw_expansion:
+                    final_prompt = raw_expansion
+                slogan = None
         except Exception as e:
             print(f"[OMMA] Prompt expansion failed, using original: {e}")
 
@@ -544,14 +547,14 @@ async def generate_image(
     else:
         raise HTTPException(status_code=500, detail="OpenAI returned no image data.")
 
-    # ── Step 4: Composite the brand logo onto the generated image ─────────────
+    # ── Step 4: Branded footer — logo + slogan composited via Pillow ─────────
     image_url = raw_url
-    if logo_url:
+    if logo_url or slogan:
         try:
-            import base64, io, httpx
-            from PIL import Image as PILImage
+            import base64, io, httpx, os, tempfile
+            from PIL import Image as PILImage, ImageDraw as PILDraw, ImageFont
 
-            # Load generated image
+            # ── Load base image ──
             if raw_url.startswith("data:"):
                 _, b64data = raw_url.split(",", 1)
                 base_bytes = base64.b64decode(b64data)
@@ -559,49 +562,83 @@ async def generate_image(
                 async with httpx.AsyncClient(timeout=20) as _http:
                     base_bytes = (await _http.get(raw_url)).content
             base_img = PILImage.open(io.BytesIO(base_bytes)).convert("RGBA")
-
-            # Load brand logo
-            if logo_url.startswith("data:"):
-                _, b64data = logo_url.split(",", 1)
-                logo_bytes = base64.b64decode(b64data)
-            else:
-                async with httpx.AsyncClient(timeout=10) as _http:
-                    logo_bytes = (await _http.get(logo_url)).content
-            logo_img = PILImage.open(io.BytesIO(logo_bytes)).convert("RGBA")
-
-            # Resize logo to 18% of image width, keep aspect ratio
             img_w, img_h = base_img.size
-            logo_target_w = int(img_w * 0.18)
-            logo_ratio = logo_img.height / logo_img.width
-            logo_target_h = int(logo_target_w * logo_ratio)
-            logo_img = logo_img.resize((logo_target_w, logo_target_h), PILImage.LANCZOS)
 
-            # Add white circular background behind logo for visibility
-            padding = int(logo_target_w * 0.25)
-            circle_size = logo_target_w + padding * 2
-            circle = PILImage.new("RGBA", (circle_size, circle_size), (0, 0, 0, 0))
-            from PIL import ImageDraw
-            draw = ImageDraw.Draw(circle)
-            draw.ellipse([0, 0, circle_size, circle_size], fill=(255, 255, 255, 210))
-            logo_offset_x = (circle_size - logo_target_w) // 2
-            logo_offset_y = (circle_size - logo_target_h) // 2
-            circle.paste(logo_img, (logo_offset_x, logo_offset_y), logo_img)
+            # ── Footer dimensions ──
+            footer_h = int(img_h * 0.14)
+            pad = int(img_w * 0.04)
 
-            # Place in bottom-right corner
-            margin = int(img_w * 0.04)
-            x = img_w - circle_size - margin
-            y = img_h - circle_size - margin
-            base_img.paste(circle, (x, y), circle)
+            # ── Dark gradient overlay on bottom of base image ──
+            gradient = PILImage.new("RGBA", (img_w, footer_h * 2), (0, 0, 0, 0))
+            for y_px in range(footer_h * 2):
+                alpha = int(200 * (y_px / (footer_h * 2)))
+                PILDraw.Draw(gradient).line([(0, y_px), (img_w, y_px)], fill=(0, 0, 0, alpha))
+            base_img.paste(gradient, (0, img_h - footer_h * 2), gradient)
 
-            # Encode final image as base64 PNG
+            draw = PILDraw.Draw(base_img)
+
+            # ── Load font (download Inter Bold from GitHub, cache to /tmp) ──
+            font_path = os.path.join(tempfile.gettempdir(), "omma_Inter_Bold.ttf")
+            if not os.path.exists(font_path):
+                try:
+                    async with httpx.AsyncClient(timeout=15) as _http:
+                        font_r = await _http.get(
+                            "https://github.com/google/fonts/raw/main/ofl/inter/static/Inter_18pt-Bold.ttf"
+                        )
+                    with open(font_path, "wb") as _f:
+                        _f.write(font_r.content)
+                except Exception:
+                    font_path = None
+
+            slogan_font_size = max(24, int(img_w * 0.032))
+            name_font_size = max(18, int(img_w * 0.022))
+            try:
+                slogan_font = ImageFont.truetype(font_path, slogan_font_size) if font_path else ImageFont.load_default()
+                name_font = ImageFont.truetype(font_path, name_font_size) if font_path else ImageFont.load_default()
+            except Exception:
+                slogan_font = ImageFont.load_default()
+                name_font = ImageFont.load_default()
+
+            # ── Logo ──
+            logo_x = pad
+            logo_y = img_h - footer_h + (footer_h - int(img_h * 0.08)) // 2
+            logo_rendered_w = 0
+
+            if logo_url:
+                if logo_url.startswith("data:"):
+                    _, b64data = logo_url.split(",", 1)
+                    logo_bytes = base64.b64decode(b64data)
+                else:
+                    async with httpx.AsyncClient(timeout=10) as _http:
+                        logo_bytes = (await _http.get(logo_url)).content
+                logo_img = PILImage.open(io.BytesIO(logo_bytes)).convert("RGBA")
+
+                logo_h_target = int(footer_h * 0.6)
+                logo_w_target = int(logo_img.width * (logo_h_target / logo_img.height))
+                logo_img = logo_img.resize((logo_w_target, logo_h_target), PILImage.LANCZOS)
+                logo_y = img_h - footer_h + (footer_h - logo_h_target) // 2
+                base_img.paste(logo_img, (logo_x, logo_y), logo_img)
+                logo_rendered_w = logo_w_target
+
+            # ── Text block (brand name + slogan) ──
+            text_x = logo_x + logo_rendered_w + (pad if logo_rendered_w else 0)
+            name_y = img_h - footer_h + int(footer_h * 0.18)
+            slogan_y = name_y + name_font_size + int(img_h * 0.008)
+
+            if brand_name:
+                draw.text((text_x, name_y), brand_name.upper(), font=name_font, fill=(200, 200, 200, 220))
+            if slogan:
+                draw.text((text_x, slogan_y), slogan, font=slogan_font, fill=(255, 255, 255, 255))
+
+            # ── Encode final image ──
             out = io.BytesIO()
             base_img.convert("RGB").save(out, format="PNG")
             out.seek(0)
             final_b64 = base64.b64encode(out.read()).decode()
             image_url = f"data:image/png;base64,{final_b64}"
-            print(f"[OMMA] Logo composited onto image for brand {item.brand_id}")
+            print(f"[OMMA] Branded footer composited — logo={'yes' if logo_url else 'no'}, slogan={slogan!r}")
         except Exception as comp_err:
-            print(f"[OMMA] Logo compositing failed ({comp_err}), using raw image")
+            print(f"[OMMA] Compositing failed ({comp_err}), using raw image")
             image_url = raw_url
 
     item.image_url = image_url
