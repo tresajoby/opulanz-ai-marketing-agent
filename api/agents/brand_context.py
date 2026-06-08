@@ -100,7 +100,7 @@ class BrandContextAgent:
         try:
             resp = await self._anthropic.messages.create(
                 model=self.MODEL,
-                max_tokens=2048,
+                max_tokens=4096,
                 system=system_prompt,
                 messages=messages,
             )
@@ -114,7 +114,7 @@ class BrandContextAgent:
             oai_messages = [{"role": "system", "content": system_prompt}] + messages
             resp = await self._openai.chat.completions.create(
                 model=self.FALLBACK_MODEL,
-                max_tokens=2048,
+                max_tokens=4096,
                 messages=oai_messages,
             )
             return (
@@ -258,23 +258,9 @@ class BrandContextAgent:
             "---VARIANT [SHORT|MEDIUM|LONG]---\n"
             "[post text here]\n"
             "HASHTAGS: [hashtags here or NONE]\n"
-            "IMAGE_PROMPT: [Write a highly detailed DALL-E 3 prompt (minimum 80 words) from the perspective of "
-            "a senior digital marketing art director. The image MUST stop the scroll and make viewers curious "
-            "enough to read the post and click to learn more. Include ALL of the following:\n"
-            "(1) SCROLL-STOPPING HOOK — what is the single visual element that grabs attention in under 0.5 seconds? "
-            "Bold contrast, unexpected juxtaposition, or visually surprising composition;\n"
-            "(2) DESIRE & ASPIRATION — the scene should make the viewer feel they WANT what is being shown. "
-            "Use aspirational context: premium surfaces, beautiful environments, or striking abstract concepts;\n"
-            "(3) PRODUCT/SERVICE AS HERO — the brand offering is front and centre, shown in its most desirable light. "
-            "Make it look like something the viewer cannot have yet but desperately wants;\n"
-            "(4) BRAND COLORS — explicitly name them and show where they appear in the scene;\n"
-            "(5) PLATFORM-OPTIMISED COMPOSITION — describe the framing and layout for the platform;\n"
-            "(6) LIGHTING — describe the exact lighting that creates mood: golden hour warmth, dramatic studio, "
-            "soft cinematic, bright airy, or neon glow;\n"
-            "(7) EMOTIONAL TRIGGER — the mood must create ONE of: FOMO, desire, curiosity, trust, or excitement;\n"
-            "(8) VISUAL QUALITY — photorealistic editorial photography or premium 3D render, ultra-sharp, "
-            "magazine-quality finish, cinematic depth of field.\n"
-            "NO text, words, logos, or human faces in the image.]\n"
+            "IMAGE_PROMPT: [1-2 sentence visual concept for a scroll-stopping marketing image: "
+            "describe the hero subject, mood, lighting, and brand color usage. "
+            "No text, logos, or human faces. Keep it under 40 words — it will be expanded later.]\n"
             "---END VARIANT---\n"
         )
 
