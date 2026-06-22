@@ -394,9 +394,14 @@ async def delete_content(
 
 # ─── Image generation ─────────────────────────────────────────────────────────
 
+class GenerateImageRequest(BaseModel):
+    custom_prompt: str | None = None
+
+
 @router.post("/{item_id}/generate-image", status_code=status.HTTP_200_OK)
 async def generate_image(
     item_id: int,
+    body: GenerateImageRequest | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role(
         UserRole.super_admin, UserRole.marketing_manager, UserRole.content_creator
@@ -404,17 +409,21 @@ async def generate_image(
 ):
     """Generate a DALL-E 3 image from the content item's image_prompt.
     Claude Haiku first expands the prompt with brand visual details before calling DALL-E.
+    Pass custom_prompt in the request body to override the stored prompt for this generation.
     """
     item = await _get_content_or_404(item_id, db)
 
-    if not item.image_prompt:
+    # Use custom_prompt if provided, otherwise fall back to stored image_prompt
+    active_prompt = (body.custom_prompt.strip() if body and body.custom_prompt and body.custom_prompt.strip() else None) or item.image_prompt
+
+    if not active_prompt:
         raise HTTPException(status_code=400, detail="Content item has no image_prompt to generate from.")
 
     if not settings.openai_api_key:
         raise HTTPException(status_code=500, detail="OPENAI_API_KEY is not configured on the server.")
 
     # ── Step 1: Expand the prompt with Claude Haiku ───────────────────────────
-    final_prompt = item.image_prompt
+    final_prompt = active_prompt
     slogan: str | None = None
     logo_url: str | None = None
     brand_name: str = ""

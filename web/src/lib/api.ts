@@ -165,10 +165,13 @@ export const contentApi = {
     request(`/api/content/${id}/publish`, { method: "POST" }),
   delete: (id: number) =>
     request(`/api/content/${id}`, { method: "DELETE" }),
-  generateImage: (id: number) =>
+  generateImage: (id: number, customPrompt?: string) =>
     request<{ image_url: string; content_item_id: number }>(
       `/api/content/${id}/generate-image`,
-      { method: "POST" },
+      {
+        method: "POST",
+        body: JSON.stringify({ custom_prompt: customPrompt ?? null }),
+      },
       60_000,
     ),
 };

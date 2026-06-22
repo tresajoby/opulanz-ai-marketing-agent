@@ -6,7 +6,7 @@ import { platformLabel, platformColor } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 import {
   Copy, CheckCircle, XCircle, RefreshCw, Rocket,
-  Hash, ImageIcon, Bot, Check, Loader2, Sparkles,
+  Hash, ImageIcon, Bot, Check, Loader2, Sparkles, Pencil, X,
 } from "lucide-react";
 import type { ApprovalQueueItem } from "@/types";
 
@@ -53,6 +53,8 @@ export function PostCard({ item, onAction, onRevise }: PostCardProps) {
   const [imageUrl, setImageUrl] = useState<string | null>(ci.image_url ?? null);
   const [imageLoading, setImageLoading] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
+  const [editingPrompt, setEditingPrompt] = useState(false);
+  const [promptDraft, setPromptDraft] = useState(ci.image_prompt ?? "");
 
   const confidence = ci.ai_confidence_score ?? null;
   const compliance = ci.generation_metadata?.compliance_score as number | null ?? null;
@@ -103,9 +105,11 @@ export function PostCard({ item, onAction, onRevise }: PostCardProps) {
   }
 
   async function handleGenerateImage() {
+    setEditingPrompt(false);
     setImageLoading(true); setImageError(null);
     try {
-      const res = await contentApi.generateImage(ci.id);
+      const customPrompt = promptDraft.trim() !== ci.image_prompt?.trim() ? promptDraft.trim() : undefined;
+      const res = await contentApi.generateImage(ci.id, customPrompt);
       setImageUrl(res.image_url);
     } catch (e: unknown) {
       setImageError(e instanceof Error ? e.message : "Image generation failed");
@@ -154,16 +158,60 @@ export function PostCard({ item, onAction, onRevise }: PostCardProps) {
 
         {ci.image_prompt && (
           <div className="mt-3 space-y-2">
-            <div className="bg-violet-50 rounded-lg px-3 py-2 flex items-start gap-2">
-              <ImageIcon className="h-3.5 w-3.5 text-violet-500 mt-0.5 shrink-0" />
-              <p className="text-xs text-violet-700 italic">{ci.image_prompt}</p>
+            {/* Prompt display / inline editor */}
+            <div className="bg-violet-50 rounded-lg px-3 py-2">
+              <div className="flex items-start gap-2">
+                <ImageIcon className="h-3.5 w-3.5 text-violet-500 mt-0.5 shrink-0" />
+                {editingPrompt ? (
+                  <div className="flex-1 space-y-2">
+                    <textarea
+                      value={promptDraft}
+                      onChange={(e) => setPromptDraft(e.target.value)}
+                      rows={4}
+                      className="w-full text-xs text-violet-900 bg-white border border-violet-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-400 resize-none"
+                    />
+                    <button
+                      onClick={() => { setEditingPrompt(false); setPromptDraft(ci.image_prompt ?? ""); }}
+                      className="flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:bg-gray-100 rounded"
+                    >
+                      <X className="h-3 w-3" /> Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex-1 flex items-start justify-between gap-2">
+                    <p className="text-xs text-violet-700 italic">{promptDraft}</p>
+                    <button
+                      onClick={() => setEditingPrompt(true)}
+                      className="shrink-0 p-1 rounded hover:bg-violet-100 text-violet-400 hover:text-violet-600 transition-colors"
+                      title="Edit image prompt"
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
+
+            {/* Generated image or generate button */}
             {imageUrl ? (
-              <img
-                src={imageUrl}
-                alt="AI-generated"
-                className="w-full rounded-lg border border-gray-200 object-cover"
-              />
+              <div className="space-y-2">
+                <img
+                  src={imageUrl}
+                  alt="AI-generated"
+                  className="w-full rounded-lg border border-gray-200 object-cover"
+                />
+                <button
+                  onClick={handleGenerateImage}
+                  disabled={imageLoading}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-100 text-violet-700 text-xs font-medium hover:bg-violet-200 disabled:opacity-50 transition-colors"
+                >
+                  {imageLoading
+                    ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Regenerating…</>
+                    : <><RefreshCw className="h-3.5 w-3.5" /> Regenerate Image</>
+                  }
+                </button>
+                {imageError && <p className="mt-1 text-xs text-red-600">{imageError}</p>}
+              </div>
             ) : (
               <div>
                 <button
