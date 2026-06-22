@@ -42,12 +42,12 @@ _PLATFORM_CONFIG = {
     "facebook": {
         "auth_url": "https://www.facebook.com/v18.0/dialog/oauth",
         "token_url": "https://graph.facebook.com/v18.0/oauth/access_token",
-        "scopes": "pages_show_list,pages_read_engagement,pages_manage_posts",
+        "scopes": "email,public_profile,pages_show_list,pages_read_engagement,pages_manage_posts",
     },
     "instagram": {
         "auth_url": "https://www.facebook.com/v18.0/dialog/oauth",
         "token_url": "https://graph.facebook.com/v18.0/oauth/access_token",
-        "scopes": "pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish",
+        "scopes": "email,public_profile,pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish",
     },
     "linkedin": {
         "auth_url": "https://www.linkedin.com/oauth/v2/authorization",
@@ -97,7 +97,7 @@ def _verify_state(state: str) -> dict:
 
 
 def _redirect_uri(platform: str) -> str:
-    base = settings.api_base_url.rstrip("/") or "http://localhost:8000"
+    base = (settings.api_base_url or "").strip().rstrip("/") or "http://localhost:8000"
     return f"{base}/api/social/callback/{platform}"
 
 
@@ -446,6 +446,53 @@ async def list_accounts(
         .order_by(SocialAccount.platform)
     )
     return result.scalars().all()
+
+
+# ─── Manual token connect ────────────────────────────────────────────────────
+
+class ManualConnectRequest(BaseModel):
+    platform: str
+    page_id: str
+    page_name: str
+    access_token: str
+
+
+@router.post("/brands/{brand_id}/manual-connect", status_code=status.HTTP_200_OK)
+async def manual_connect(
+    brand_id: int,
+    body: ManualConnectRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Manually store a page access token without going through OAuth."""
+    encrypted = encrypt(body.access_token)
+
+    result = await db.execute(
+        select(SocialAccount).where(
+            SocialAccount.brand_id == brand_id,
+            SocialAccount.platform == body.platform,
+            SocialAccount.account_id == body.page_id,
+        )
+    )
+    existing = result.scalar_one_or_none()
+
+    if existing:
+        existing.access_token_encrypted = encrypted
+        existing.is_active = True
+        existing.updated_at = datetime.utcnow()
+    else:
+        db.add(SocialAccount(
+            brand_id=brand_id,
+            platform=body.platform,
+            account_id=body.page_id,
+            account_name=body.page_name,
+            access_token_encrypted=encrypted,
+            is_active=True,
+            connected_at=datetime.utcnow(),
+        ))
+
+    await db.commit()
+    return {"message": f"{body.platform.title()} page '{body.page_name}' connected successfully."}
 
 
 # ─── Disconnect ───────────────────────────────────────────────────────────────
