@@ -152,6 +152,27 @@ function SocialAccountsTab({
   refetch: () => void;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
+  const [pasteMode, setPasteMode] = useState<string | null>(null);
+  const [pasteForm, setPasteForm] = useState({ pageId: "", pageName: "", token: "" });
+  const [pasteError, setPasteError] = useState<string | null>(null);
+
+  async function handleManualConnect(platform: string) {
+    if (!pasteForm.token.trim()) { setPasteError("Access token is required."); return; }
+    if (!pasteForm.pageId.trim()) { setPasteError("Page ID is required."); return; }
+    setBusy(`manual-${platform}`);
+    setPasteError(null);
+    try {
+      await socialApi.manualConnect(brandId, platform, pasteForm.pageId.trim(), pasteForm.pageName.trim() || platform, pasteForm.token.trim());
+      setPasteMode(null);
+      setPasteForm({ pageId: "", pageName: "", token: "" });
+      refetch();
+      onFlash("success", `${platform} connected successfully.`);
+    } catch (e: unknown) {
+      setPasteError(e instanceof Error ? e.message : "Connection failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
 
   function handleConnect(platform: string) {
     const url = socialApi.getConnectUrl(platform, brandId);
@@ -212,43 +233,96 @@ function SocialAccountsTab({
             return (
               <div
                 key={plat.key}
-                className={`rounded-xl border p-4 flex items-center gap-3 ${
+                className={`rounded-xl border p-4 ${
                   isConnected ? "border-emerald-200 bg-emerald-50" : "border-gray-200 bg-gray-50"
                 }`}
               >
-                <div className={`h-10 w-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${
-                  isConnected
-                    ? isGradient ? `bg-gradient-to-br ${plat.color} ${plat.textColor}` : `${plat.color} ${plat.textColor}`
-                    : "bg-gray-200 text-gray-500"
-                }`}>
-                  {plat.abbr}
+                {/* Main row */}
+                <div className="flex items-center gap-3">
+                  <div className={`h-10 w-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${
+                    isConnected
+                      ? isGradient ? `bg-gradient-to-br ${plat.color} ${plat.textColor}` : `${plat.color} ${plat.textColor}`
+                      : "bg-gray-200 text-gray-500"
+                  }`}>
+                    {plat.abbr}
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900">{plat.label}</p>
+                    {isConnected
+                      ? <p className="text-xs text-emerald-700 truncate">{acct.account_name}</p>
+                      : <p className="text-xs text-gray-400">Not connected</p>
+                    }
+                  </div>
+
+                  {isConnected ? (
+                    <button
+                      onClick={() => handleDisconnect(acct)}
+                      disabled={isBusy}
+                      className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-50 disabled:opacity-50 transition-colors shrink-0"
+                    >
+                      {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Link2Off className="h-3.5 w-3.5" />}
+                      Disconnect
+                    </button>
+                  ) : (
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      <button
+                        onClick={() => handleConnect(plat.key)}
+                        className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 px-2 py-1 rounded hover:bg-indigo-50 transition-colors font-medium"
+                      >
+                        <Link2 className="h-3.5 w-3.5" />
+                        Connect
+                      </button>
+                      <button
+                        onClick={() => { setPasteMode(plat.key); setPasteForm({ pageId: "", pageName: "", token: "" }); setPasteError(null); }}
+                        className="text-xs text-gray-400 hover:text-gray-600 px-2"
+                      >
+                        Paste token
+                      </button>
+                    </div>
+                  )}
                 </div>
 
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900">{plat.label}</p>
-                  {isConnected
-                    ? <p className="text-xs text-emerald-700 truncate">{acct.account_name}</p>
-                    : <p className="text-xs text-gray-400">Not connected</p>
-                  }
-                </div>
-
-                {isConnected ? (
-                  <button
-                    onClick={() => handleDisconnect(acct)}
-                    disabled={isBusy}
-                    className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-50 disabled:opacity-50 transition-colors shrink-0"
-                  >
-                    {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Link2Off className="h-3.5 w-3.5" />}
-                    Disconnect
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => handleConnect(plat.key)}
-                    className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 px-2 py-1 rounded hover:bg-indigo-50 transition-colors shrink-0 font-medium"
-                  >
-                    <Link2 className="h-3.5 w-3.5" />
-                    Connect
-                  </button>
+                {/* Paste token form */}
+                {pasteMode === plat.key && (
+                  <div className="mt-3 pt-3 border-t border-gray-200 space-y-2">
+                    <input
+                      placeholder="Page / Account ID"
+                      value={pasteForm.pageId}
+                      onChange={e => setPasteForm(f => ({ ...f, pageId: e.target.value }))}
+                      className="w-full text-xs border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    />
+                    <input
+                      placeholder="Page name (e.g. Opulanz)"
+                      value={pasteForm.pageName}
+                      onChange={e => setPasteForm(f => ({ ...f, pageName: e.target.value }))}
+                      className="w-full text-xs border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    />
+                    <textarea
+                      placeholder="Paste access token here"
+                      value={pasteForm.token}
+                      onChange={e => setPasteForm(f => ({ ...f, token: e.target.value }))}
+                      rows={2}
+                      className="w-full text-xs border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-none font-mono"
+                    />
+                    {pasteError && <p className="text-xs text-red-500">{pasteError}</p>}
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleManualConnect(plat.key)}
+                        disabled={busy === `manual-${plat.key}`}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 disabled:opacity-50"
+                      >
+                        {busy === `manual-${plat.key}` ? <Loader2 className="h-3 w-3 animate-spin" /> : <Link2 className="h-3 w-3" />}
+                        Save
+                      </button>
+                      <button
+                        onClick={() => { setPasteMode(null); setPasteError(null); }}
+                        className="px-3 py-1.5 rounded text-xs text-gray-500 hover:bg-gray-100"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
             );

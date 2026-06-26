@@ -187,4 +187,9 @@ export const socialApi = {
   },
   disconnect: (accountId: number) =>
     request(`/api/social/accounts/${accountId}`, { method: "DELETE" }),
+  manualConnect: (brandId: number, platform: string, pageId: string, pageName: string, accessToken: string) =>
+    request(`/api/social/brands/${brandId}/manual-connect`, {
+      method: "POST",
+      body: JSON.stringify({ platform, page_id: pageId, page_name: pageName, access_token: accessToken }),
+    }),
 };
