@@ -477,7 +477,7 @@ async def manual_connect(
     existing = result.scalar_one_or_none()
 
     if existing:
-        existing.access_token_encrypted = encrypted
+        existing.access_token = encrypted
         existing.is_active = True
         existing.updated_at = datetime.utcnow()
     else:
@@ -486,7 +486,7 @@ async def manual_connect(
             platform=body.platform,
             account_id=body.page_id,
             account_name=body.page_name,
-            access_token_encrypted=encrypted,
+            access_token=encrypted,
             is_active=True,
             connected_at=datetime.utcnow(),
         ))
