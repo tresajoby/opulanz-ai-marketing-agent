@@ -69,6 +69,12 @@ class MetaPublisher:
             return r2.json().get("id", creation_id)
 
     async def _publish_facebook(self, page_id: str, token: str, post: PostPayload) -> str:
+        # Extract numeric ID if a full URL was stored
+        if page_id.startswith("http"):
+            from urllib.parse import urlparse, parse_qs
+            qs = parse_qs(urlparse(page_id).query)
+            page_id = qs.get("id", [page_id])[0]
+
         async with httpx.AsyncClient(timeout=30) as http:
             if post.image_url:
                 r = await http.post(
@@ -95,7 +101,28 @@ class LinkedInPublisher:
         if not token:
             raise ValueError("No valid access token for LinkedIn account.")
 
-        person_urn = f"urn:li:person:{account.account_id}"
+        # Try to get the real member ID from LinkedIn at publish time
+        # (stored account_id may be a placeholder if profile scope wasn't available)
+        person_urn = None
+        async with httpx.AsyncClient(timeout=15) as _http:
+            for endpoint in [
+                "https://api.linkedin.com/v2/userinfo",
+                "https://api.linkedin.com/v2/me",
+            ]:
+                try:
+                    r = await _http.get(endpoint, headers={"Authorization": f"Bearer {token}"})
+                    if r.is_success:
+                        data = r.json()
+                        member_id = data.get("sub") or data.get("id")
+                        if member_id:
+                            person_urn = member_id if member_id.startswith("urn:") else f"urn:li:person:{member_id}"
+                            break
+                except Exception:
+                    continue
+
+        if not person_urn:
+            stored = account.account_id
+            person_urn = stored if stored.startswith("urn:") else f"urn:li:person:{stored}"
         body: dict = {
             "author": person_urn,
             "lifecycleState": "PUBLISHED",
