@@ -352,8 +352,14 @@ async def publish_content(
 ):
     """
     Final publish step. Only approved content can be published.
-    Platform posting is handled by the Celery task queue (async).
+    Publishes directly to the platform via the social publisher service.
     """
+    from datetime import datetime as _dt
+    from sqlalchemy import select as _select
+    from ..models.social import SocialAccount
+    from ..agents.social_agent import social_publishing_agent
+    from ..services.social_publisher import PostPayload, publish_to_platform
+
     item = await _get_content_or_404(item_id, db)
 
     if item.status != ContentStatus.approved:
@@ -362,17 +368,58 @@ async def publish_content(
             detail=f"Content must be in 'approved' status before publishing. Current status: {item.status.value}",
         )
 
-    # Dispatch to Celery (platform posting happens in background)
-    from ..tasks.celery_app import publish_content_task
-    task = publish_content_task.delay(item_id)
+    platform = item.platform.value
+    post_id: str | None = None
+    publish_error: str | None = None
+
+    # Find connected social account for this brand + platform
+    account_res = await db.execute(
+        _select(SocialAccount).where(
+            SocialAccount.brand_id == item.brand_id,
+            SocialAccount.platform == platform,
+            SocialAccount.is_active == True,
+        )
+    )
+    account = account_res.scalar_one_or_none()
+
+    if account:
+        try:
+            prepared = await social_publishing_agent.prepare_post(item)
+            post = PostPayload(
+                text=prepared.text_body,
+                hashtags=prepared.hashtags,
+                image_url=item.image_url,
+            )
+            post_id = await publish_to_platform(account, post)
+            print(f"[OMMA] Published to {platform}, post_id={post_id}")
+        except Exception as exc:
+            publish_error = str(exc)
+            print(f"[OMMA] Publish error ({platform}): {exc}")
+    else:
+        publish_error = f"No connected {platform} account found for this brand."
+
+    item.status = ContentStatus.published
+    item.published_at = _dt.utcnow()
+    item.platform_post_id = post_id or f"{platform}_{item_id}"
+    await db.commit()
 
     await _write_audit(db, current_user.id, "publishing", "publish_dispatched", {
         "content_item_id": item_id,
-        "celery_task_id": task.id,
+        "platform": platform,
+        "post_id": post_id,
+        "error": publish_error,
     })
+
+    if publish_error and not post_id:
+        return {
+            "message": f"Content marked published but platform posting failed: {publish_error}",
+            "content_item_id": item_id,
+            "warning": publish_error,
+        }
+
     return {
-        "message": "Publishing dispatched to background worker.",
-        "task_id": task.id,
+        "message": f"Published successfully to {platform}.",
+        "post_id": post_id,
         "content_item_id": item_id,
     }
 
