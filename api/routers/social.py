@@ -52,7 +52,7 @@ _PLATFORM_CONFIG = {
     "linkedin": {
         "auth_url": "https://www.linkedin.com/oauth/v2/authorization",
         "token_url": "https://www.linkedin.com/oauth/v2/accessToken",
-        "scopes": "w_member_social",
+        "scopes": "openid profile w_member_social",
     },
     "tiktok": {
         "auth_url": "https://www.tiktok.com/v2/auth/authorize/",
