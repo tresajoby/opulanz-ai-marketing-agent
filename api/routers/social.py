@@ -357,21 +357,33 @@ async def _handle_linkedin_callback(
     person_id = ""
     name = "LinkedIn User"
 
-    async with httpx.AsyncClient(timeout=15) as http:
-        # Try OpenID Connect userinfo
-        try:
-            r = await http.get(
-                "https://api.linkedin.com/v2/userinfo",
-                headers={"Authorization": f"Bearer {access_token}"},
-            )
-            if r.is_success:
-                data = r.json()
-                person_id = data.get("sub", "")
-                name = data.get("name") or data.get("given_name") or name
-        except Exception:
-            pass
+    # Try 1: decode the LinkedIn JWT access token (modern LinkedIn tokens contain sub claim)
+    try:
+        import base64 as _b64, json as _json
+        parts = access_token.split(".")
+        if len(parts) == 3:
+            pad = parts[1] + "=" * (4 - len(parts[1]) % 4)
+            payload = _json.loads(_b64.urlsafe_b64decode(pad))
+            person_id = payload.get("sub", "")
+    except Exception:
+        pass
 
-        # Fall back to /v2/me (works with w_member_social on some LinkedIn apps)
+    async with httpx.AsyncClient(timeout=15) as http:
+        # Try 2: OpenID Connect userinfo
+        if not person_id:
+            try:
+                r = await http.get(
+                    "https://api.linkedin.com/v2/userinfo",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+                if r.is_success:
+                    data = r.json()
+                    person_id = data.get("sub", "")
+                    name = data.get("name") or data.get("given_name") or name
+            except Exception:
+                pass
+
+        # Try 3: /v2/me with versioned header
         if not person_id:
             try:
                 r = await http.get(
@@ -379,11 +391,12 @@ async def _handle_linkedin_callback(
                     headers={
                         "Authorization": f"Bearer {access_token}",
                         "X-Restli-Protocol-Version": "2.0.0",
+                        "linkedin-version": "202406",
                     },
                 )
                 if r.is_success:
                     data = r.json()
-                    person_id = data.get("id", "")
+                    person_id = data.get("id", "") or data.get("sub", "")
                     fname = data.get("localizedFirstName", "")
                     lname = data.get("localizedLastName", "")
                     if fname or lname:
