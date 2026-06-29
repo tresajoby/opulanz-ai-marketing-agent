@@ -52,7 +52,7 @@ _PLATFORM_CONFIG = {
     "linkedin": {
         "auth_url": "https://www.linkedin.com/oauth/v2/authorization",
         "token_url": "https://www.linkedin.com/oauth/v2/accessToken",
-        "scopes": "w_member_social openid profile",
+        "scopes": "w_member_social",
     },
     "tiktok": {
         "auth_url": "https://www.tiktok.com/v2/auth/authorize/",
@@ -354,21 +354,42 @@ async def _handle_linkedin_callback(
     access_token = token_data["access_token"]
     scopes = token_data.get("scope", "")
 
-    # Try OpenID Connect userinfo first; fall back gracefully if not enabled
     person_id = ""
     name = "LinkedIn User"
-    try:
-        async with httpx.AsyncClient(timeout=15) as http:
-            me_r = await http.get(
+
+    async with httpx.AsyncClient(timeout=15) as http:
+        # Try OpenID Connect userinfo
+        try:
+            r = await http.get(
                 "https://api.linkedin.com/v2/userinfo",
                 headers={"Authorization": f"Bearer {access_token}"},
             )
-            if me_r.is_success:
-                me = me_r.json()
-                person_id = me.get("sub", "")
-                name = me.get("name") or me.get("given_name") or name
-    except Exception:
-        pass
+            if r.is_success:
+                data = r.json()
+                person_id = data.get("sub", "")
+                name = data.get("name") or data.get("given_name") or name
+        except Exception:
+            pass
+
+        # Fall back to /v2/me (works with w_member_social on some LinkedIn apps)
+        if not person_id:
+            try:
+                r = await http.get(
+                    "https://api.linkedin.com/v2/me",
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "X-Restli-Protocol-Version": "2.0.0",
+                    },
+                )
+                if r.is_success:
+                    data = r.json()
+                    person_id = data.get("id", "")
+                    fname = data.get("localizedFirstName", "")
+                    lname = data.get("localizedLastName", "")
+                    if fname or lname:
+                        name = f"{fname} {lname}".strip()
+            except Exception:
+                pass
 
     return await _upsert_account(
         db, brand_id, "linkedin", person_id or f"li_{brand_id}", name, access_token, scopes=scopes
