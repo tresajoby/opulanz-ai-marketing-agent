@@ -123,14 +123,26 @@ class LinkedInPublisher:
         if not person_urn:
             stored = account.account_id
             person_urn = stored if stored.startswith("urn:") else f"urn:li:person:{stored}"
+
+        share_content: dict = {
+            "shareCommentary": {"text": post.caption},
+            "shareMediaCategory": "NONE",
+        }
+
+        if post.image_url:
+            asset_urn = await self._upload_image(person_urn, token, post.image_url)
+            if asset_urn:
+                share_content["shareMediaCategory"] = "IMAGE"
+                share_content["media"] = [{
+                    "status": "READY",
+                    "media": asset_urn,
+                }]
+
         body: dict = {
             "author": person_urn,
             "lifecycleState": "PUBLISHED",
             "specificContent": {
-                "com.linkedin.ugc.ShareContent": {
-                    "shareCommentary": {"text": post.caption},
-                    "shareMediaCategory": "NONE",
-                }
+                "com.linkedin.ugc.ShareContent": share_content
             },
             "visibility": {"com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC"},
         }
@@ -146,6 +158,59 @@ class LinkedInPublisher:
             )
             r.raise_for_status()
             return r.headers.get("x-restli-id", account.account_id)
+
+    async def _upload_image(self, person_urn: str, token: str, image_url: str) -> str | None:
+        """Register an image upload with LinkedIn, push the bytes, and return the asset URN."""
+        try:
+            # Step 1: get the raw image bytes
+            if image_url.startswith("data:"):
+                import base64
+                _, b64data = image_url.split(",", 1)
+                image_bytes = base64.b64decode(b64data)
+            else:
+                async with httpx.AsyncClient(timeout=30) as http:
+                    img_r = await http.get(image_url)
+                    img_r.raise_for_status()
+                    image_bytes = img_r.content
+
+            async with httpx.AsyncClient(timeout=30) as http:
+                # Step 2: register the upload
+                reg = await http.post(
+                    f"{self.BASE}/assets?action=registerUpload",
+                    json={
+                        "registerUploadRequest": {
+                            "recipes": ["urn:li:digitalmediaRecipe:feedshare-image"],
+                            "owner": person_urn,
+                            "serviceRelationships": [{
+                                "relationshipType": "OWNER",
+                                "identifier": "urn:li:userGeneratedContent",
+                            }],
+                        }
+                    },
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "X-Restli-Protocol-Version": "2.0.0",
+                    },
+                )
+                reg.raise_for_status()
+                reg_data = reg.json()["value"]
+                upload_url = reg_data["uploadMechanism"][
+                    "com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest"
+                ]["uploadUrl"]
+                asset_urn = reg_data["asset"]
+
+                # Step 3: upload the binary
+                up = await http.put(
+                    upload_url,
+                    content=image_bytes,
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                up.raise_for_status()
+
+            return asset_urn
+        except Exception as exc:
+            print(f"[OMMA] LinkedIn image upload failed: {exc}")
+            return None
 
 
 # ─── TikTok ───────────────────────────────────────────────────────────────────
