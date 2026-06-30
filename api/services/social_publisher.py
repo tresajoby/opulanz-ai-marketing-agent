@@ -76,7 +76,17 @@ class MetaPublisher:
             page_id = qs.get("id", [page_id])[0]
 
         async with httpx.AsyncClient(timeout=30) as http:
-            if post.image_url:
+            if post.image_url and post.image_url.startswith("data:"):
+                # Base64 image — upload as binary multipart, too long for a URL query param
+                import base64
+                _, b64data = post.image_url.split(",", 1)
+                image_bytes = base64.b64decode(b64data)
+                r = await http.post(
+                    f"{self.BASE}/{page_id}/photos",
+                    data={"message": post.caption, "access_token": token},
+                    files={"source": ("image.png", image_bytes, "image/png")},
+                )
+            elif post.image_url:
                 r = await http.post(
                     f"{self.BASE}/{page_id}/photos",
                     params={"url": post.image_url, "message": post.caption, "access_token": token},
