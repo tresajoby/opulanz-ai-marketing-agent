@@ -8,6 +8,7 @@ TikTokPublisher   : TikTok Creator API (Photo Post)
 Each publisher decrypts the stored access token at call time.
 """
 
+import asyncio
 from dataclasses import dataclass
 
 import httpx
@@ -61,6 +62,23 @@ class MetaPublisher:
                 print(f"[OMMA] Instagram API error {r.status_code}: {r.text}")
             r.raise_for_status()
             creation_id = r.json()["id"]
+
+            # Wait for Instagram to finish processing the image before publishing
+            for _ in range(12):
+                await asyncio.sleep(5)
+                status_r = await http.get(
+                    f"{self.BASE}/{creation_id}",
+                    params={"fields": "status_code", "access_token": token},
+                )
+                if status_r.is_success:
+                    status = status_r.json().get("status_code", "")
+                    print(f"[OMMA] Instagram media status: {status}")
+                    if status == "FINISHED":
+                        break
+                    if status == "ERROR":
+                        raise ValueError("Instagram media processing failed.")
+                else:
+                    break
 
             # Step 2: publish
             r2 = await http.post(
