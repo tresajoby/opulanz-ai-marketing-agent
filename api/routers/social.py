@@ -157,6 +157,8 @@ async def connect_platform(
         "state": state,
         "response_type": "code",
     }
+    if platform == "instagram":
+        params["auth_type"] = "rerequest"
     if platform == "tiktok":
         params["client_key"] = client_id
         del params["client_id"]
@@ -293,26 +295,57 @@ async def _handle_meta_callback(
 
     async with httpx.AsyncClient(timeout=15) as http:
         if platform == "instagram":
-            # Get the user's pages, then find the linked IG business account
+            # Get the user's pages with IG business account info
             pages_r = await http.get(
                 "https://graph.facebook.com/v18.0/me/accounts",
-                params={"fields": "instagram_business_account,name", "access_token": user_token},
+                params={"fields": "instagram_business_account,name,access_token", "access_token": user_token},
             )
             pages_r.raise_for_status()
             pages = pages_r.json().get("data", [])
+            print(f"[OMMA] Instagram OAuth: found {len(pages)} pages: {[p.get('name') for p in pages]}")
+
             ig_id, ig_name, page_token = None, None, user_token
+
+            # Try 1: IG account already in me/accounts response
             for page in pages:
+                print(f"[OMMA] Page {page.get('name')}: instagram_business_account={page.get('instagram_business_account')}")
                 if "instagram_business_account" in page:
                     ig_id = page["instagram_business_account"]["id"]
                     ig_name = page.get("name", "Instagram")
-                    # Get page-specific token
-                    tok_r = await http.get(
-                        f"https://graph.facebook.com/v18.0/{page['id']}",
-                        params={"fields": "access_token", "access_token": user_token},
-                    )
-                    tok_r.raise_for_status()
-                    page_token = tok_r.json().get("access_token", user_token)
+                    page_token = page.get("access_token", user_token)
                     break
+
+            # Try 2: Query each page directly for its linked IG account
+            if not ig_id:
+                for page in pages:
+                    p_token = page.get("access_token", user_token)
+                    page_ig_r = await http.get(
+                        f"https://graph.facebook.com/v18.0/{page['id']}",
+                        params={"fields": "instagram_business_account", "access_token": p_token},
+                    )
+                    if page_ig_r.is_success:
+                        page_data = page_ig_r.json()
+                        print(f"[OMMA] Direct page query {page['id']}: {page_data}")
+                        if "instagram_business_account" in page_data:
+                            ig_id = page_data["instagram_business_account"]["id"]
+                            ig_name = page.get("name", "Instagram")
+                            page_token = p_token
+                            break
+
+            # Try 3: me/instagram_accounts (for user-linked IG accounts)
+            if not ig_id:
+                ig_accounts_r = await http.get(
+                    "https://graph.facebook.com/v18.0/me/instagram_accounts",
+                    params={"access_token": user_token},
+                )
+                print(f"[OMMA] me/instagram_accounts: {ig_accounts_r.status_code} {ig_accounts_r.text[:300]}")
+                if ig_accounts_r.is_success:
+                    ig_accounts = ig_accounts_r.json().get("data", [])
+                    if ig_accounts:
+                        ig_id = ig_accounts[0].get("id")
+                        ig_name = ig_accounts[0].get("name", "Instagram")
+                        page_token = user_token
+
             if not ig_id:
                 raise Exception(
                     "No Instagram Business account found linked to your Facebook pages. "
