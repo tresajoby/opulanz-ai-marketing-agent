@@ -47,7 +47,7 @@ _PLATFORM_CONFIG = {
     "instagram": {
         "auth_url": "https://www.facebook.com/v18.0/dialog/oauth",
         "token_url": "https://graph.facebook.com/v18.0/oauth/access_token",
-        "scopes": "email,public_profile,pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish",
+        "scopes": "public_profile,pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish",
     },
     "linkedin": {
         "auth_url": "https://www.linkedin.com/oauth/v2/authorization",

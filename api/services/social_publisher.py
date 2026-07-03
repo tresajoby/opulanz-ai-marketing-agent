@@ -57,6 +57,8 @@ class MetaPublisher:
                     "access_token": token,
                 },
             )
+            if not r.is_success:
+                print(f"[OMMA] Instagram API error {r.status_code}: {r.text}")
             r.raise_for_status()
             creation_id = r.json()["id"]
 
@@ -65,6 +67,8 @@ class MetaPublisher:
                 f"{self.BASE}/{ig_user_id}/media_publish",
                 params={"creation_id": creation_id, "access_token": token},
             )
+            if not r2.is_success:
+                print(f"[OMMA] Instagram publish error {r2.status_code}: {r2.text}")
             r2.raise_for_status()
             return r2.json().get("id", creation_id)
 
@@ -96,6 +100,8 @@ class MetaPublisher:
                     f"{self.BASE}/{page_id}/feed",
                     params={"message": post.caption, "access_token": token},
                 )
+            if not r.is_success:
+                print(f"[OMMA] Facebook API error {r.status_code}: {r.text}")
             r.raise_for_status()
             data = r.json()
             return data.get("post_id") or data.get("id", "")

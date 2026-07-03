@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -385,10 +386,15 @@ async def publish_content(
     if account:
         try:
             prepared = await social_publishing_agent.prepare_post(item)
+            # Instagram requires a public URL — use the image-serving endpoint
+            image_url = item.image_url
+            if platform == "instagram" and image_url and image_url.startswith("data:"):
+                base = (settings.api_base_url or "").rstrip("/")
+                image_url = f"{base}/api/content/{item_id}/image"
             post = PostPayload(
                 text=prepared.text_body,
                 hashtags=prepared.hashtags,
-                image_url=item.image_url,
+                image_url=image_url,
             )
             post_id = await publish_to_platform(account, post)
             print(f"[OMMA] Published to {platform}, post_id={post_id}")
@@ -706,6 +712,32 @@ async def generate_image(
     })
 
     return {"image_url": image_url, "content_item_id": item_id}
+
+
+# ─── Public image endpoint (for Instagram which requires a public URL) ────────
+
+@router.get("/{item_id}/image")
+async def get_content_image(
+    item_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the raw image bytes for a content item — used as a public URL for Instagram publishing."""
+    item = await _get_content_or_404(item_id, db)
+    if not item.image_url:
+        raise HTTPException(status_code=404, detail="No image for this content item.")
+    if item.image_url.startswith("data:"):
+        import base64 as _b64
+        header, b64data = item.image_url.split(",", 1)
+        content_type = header.split(";")[0].replace("data:", "") or "image/png"
+        image_bytes = _b64.b64decode(b64data)
+    else:
+        import httpx as _httpx
+        async with _httpx.AsyncClient(timeout=20) as _http:
+            r = await _http.get(item.image_url)
+            r.raise_for_status()
+            image_bytes = r.content
+            content_type = r.headers.get("content-type", "image/png").split(";")[0]
+    return Response(content=image_bytes, media_type=content_type)
 
 
 # ─── Internal helpers ─────────────────────────────────────────────────────────
