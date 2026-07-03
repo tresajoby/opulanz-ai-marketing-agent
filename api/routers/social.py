@@ -532,7 +532,32 @@ async def manual_connect(
     current_user: User = Depends(get_current_user),
 ):
     """Manually store a page access token without going through OAuth."""
-    encrypted = encrypt(body.access_token)
+    token = body.access_token
+
+    # Auto-extend short-lived Meta tokens to long-lived (60 days)
+    if body.platform in ("facebook", "instagram") and settings.meta_app_id and settings.meta_app_secret:
+        try:
+            async with httpx.AsyncClient(timeout=15) as http:
+                r = await http.get(
+                    "https://graph.facebook.com/v18.0/oauth/access_token",
+                    params={
+                        "grant_type": "fb_exchange_token",
+                        "client_id": settings.meta_app_id,
+                        "client_secret": settings.meta_app_secret,
+                        "fb_exchange_token": token,
+                    },
+                )
+                if r.is_success:
+                    long_lived = r.json().get("access_token")
+                    if long_lived:
+                        token = long_lived
+                        print(f"[OMMA] {body.platform} token extended to long-lived successfully")
+                else:
+                    print(f"[OMMA] Token extension failed (using original): {r.text[:200]}")
+        except Exception as e:
+            print(f"[OMMA] Token extension error (using original): {e}")
+
+    encrypted = encrypt(token)
 
     result = await db.execute(
         select(SocialAccount).where(
