@@ -32,6 +32,7 @@ export interface Brand {
   color_palette: Record<string, string> | null;
   logo_url: string | null;
   website_url: string | null;
+  marketing_strategy: string | null;
   is_active: boolean;
   created_at: string;
 }

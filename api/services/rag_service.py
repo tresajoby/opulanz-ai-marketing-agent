@@ -190,6 +190,14 @@ class RAGService:
             lines.append("\n--- RELEVANT BRAND GUIDELINES ---")
             lines.append(guideline_chunks)
 
+        if brand.marketing_strategy:
+            lines.append("\n--- MARKETING STRATEGY ---")
+            lines.append(
+                "Use the following strategy as inspiration and guidance when creating content. "
+                "Adapt it to the specific post goal — do not copy it verbatim.\n"
+            )
+            lines.append(brand.marketing_strategy)
+
         lines.append("=== END BRAND CONTEXT ===")
         return "\n".join(lines)
 

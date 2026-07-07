@@ -27,6 +27,7 @@ class BrandCreate(BaseModel):
     color_palette: dict | None = None
     logo_url: str | None = None
     website_url: str | None = None
+    marketing_strategy: str | None = None
 
 
 class BrandOut(BaseModel):
@@ -37,6 +38,7 @@ class BrandOut(BaseModel):
     color_palette: dict | None
     logo_url: str | None
     website_url: str | None
+    marketing_strategy: str | None
     is_active: bool
     created_at: datetime
     model_config = {"from_attributes": True}

@@ -10,7 +10,7 @@ import { Input, Textarea } from "@/components/ui/Input";
 import { Alert } from "@/components/ui/Alert";
 import { brandsApi } from "@/lib/api";
 import type { WebsiteFetchResult } from "@/types";
-import { BookOpen, Package, Users, ShieldAlert, Globe, Loader2, CheckCircle2, ChevronDown, ChevronUp, Link2, Link2Off } from "lucide-react";
+import { BookOpen, Package, Users, ShieldAlert, Globe, Loader2, CheckCircle2, ChevronDown, ChevronUp, Link2, Link2Off, Target } from "lucide-react";
 import { socialApi } from "@/lib/api";
 import type { SocialAccount } from "@/types";
 
@@ -76,6 +76,14 @@ export default function BrandDetailPage() {
         <WebsiteFetchCard
           brandId={brandId}
           currentUrl={brand?.website_url ?? null}
+          onFlash={flash}
+          onSuccess={invalidateBrand}
+        />
+
+        {/* Marketing strategy card */}
+        <MarketingStrategyCard
+          brandId={brandId}
+          currentStrategy={brand?.marketing_strategy ?? null}
           onFlash={flash}
           onSuccess={invalidateBrand}
         />
@@ -555,6 +563,69 @@ function WebsiteFetchCard({
             )}
           </div>
         )}
+      </CardBody>
+    </Card>
+  );
+}
+
+
+// ─── Marketing Strategy Card ─────────────────────────────────────────────────
+
+function MarketingStrategyCard({
+  brandId,
+  currentStrategy,
+  onFlash,
+  onSuccess,
+}: {
+  brandId: number;
+  currentStrategy: string | null;
+  onFlash: (t: "success" | "error", m: string) => void;
+  onSuccess: () => void;
+}) {
+  const [strategy, setStrategy] = useState(currentStrategy ?? "");
+  const [saving, setSaving] = useState(false);
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await brandsApi.update(brandId, { marketing_strategy: strategy.trim() || null });
+      onSuccess();
+      onFlash("success", "Marketing strategy saved. AI will use it when generating posts.");
+    } catch (err: unknown) {
+      onFlash("error", err instanceof Error ? err.message : "Save failed.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Target className="h-4 w-4 text-indigo-600" />
+          <h3 className="font-semibold text-gray-900">Marketing Strategy</h3>
+        </div>
+        <p className="text-xs text-gray-500 mt-1">
+          Paste your brand's marketing strategy here. OMMA will use it as inspiration when
+          generating posts — it won't be followed rigidly, just used as context to produce
+          more aligned content.
+        </p>
+      </CardHeader>
+      <CardBody>
+        <form onSubmit={handleSave} className="space-y-3">
+          <Textarea
+            placeholder="e.g. Our goal is to position the brand as a premium yet accessible option for young professionals. We focus on aspirational lifestyle imagery, education-forward content, and community building…"
+            value={strategy}
+            onChange={(e) => setStrategy(e.target.value)}
+            rows={8}
+          />
+          <div className="flex justify-end">
+            <Button type="submit" variant="primary" loading={saving}>
+              {saving ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</> : "Save Strategy"}
+            </Button>
+          </div>
+        </form>
       </CardBody>
     </Card>
   );
