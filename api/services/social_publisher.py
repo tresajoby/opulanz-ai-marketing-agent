@@ -267,6 +267,18 @@ class TikTokPublisher:
             return await self._publish_video(token, account.account_id, post)
         return await self._publish_photo(token, account.account_id, post)
 
+    def _check_tiktok_response(self, data: dict, label: str) -> str:
+        """Raise a clear error if TikTok's JSON body signals failure (HTTP 200 but error inside)."""
+        error = data.get("error", {})
+        code = error.get("code", "ok")
+        print(f"[OMMA] TikTok {label} response: {data}")
+        if code != "ok":
+            raise ValueError(f"TikTok API error ({code}): {error.get('message', 'no message')}")
+        publish_id = data.get("data", {}).get("publish_id")
+        if not publish_id:
+            raise ValueError(f"TikTok returned no publish_id: {data}")
+        return publish_id
+
     async def _publish_photo(self, token: str, account_id: str, post: PostPayload) -> str:
         """Post image to TikTok as a photo post with auto-selected background music."""
         async with httpx.AsyncClient(timeout=60) as http:
@@ -288,10 +300,9 @@ class TikTokPublisher:
                 },
                 headers={"Authorization": f"Bearer {token}"},
             )
-            if not r.is_success:
-                print(f"[OMMA] TikTok photo post error {r.status_code}: {r.text}")
+            print(f"[OMMA] TikTok photo HTTP {r.status_code}: {r.text}")
             r.raise_for_status()
-            return r.json().get("data", {}).get("publish_id", account_id)
+            return self._check_tiktok_response(r.json(), "photo")
 
     async def _publish_video(self, token: str, account_id: str, post: PostPayload) -> str:
         """Post video to TikTok via PULL_FROM_URL. Video's own audio serves as sound."""
@@ -315,10 +326,9 @@ class TikTokPublisher:
                 },
                 headers={"Authorization": f"Bearer {token}"},
             )
-            if not r.is_success:
-                print(f"[OMMA] TikTok video post error {r.status_code}: {r.text}")
+            print(f"[OMMA] TikTok video HTTP {r.status_code}: {r.text}")
             r.raise_for_status()
-            return r.json().get("data", {}).get("publish_id", account_id)
+            return self._check_tiktok_response(r.json(), "video")
 
 
 # ─── Dispatcher ───────────────────────────────────────────────────────────────
