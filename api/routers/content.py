@@ -405,9 +405,12 @@ async def publish_content(
     else:
         publish_error = f"No connected {platform} account found for this brand."
 
-    item.status = ContentStatus.published
-    item.published_at = _dt.utcnow()
-    item.platform_post_id = post_id or f"{platform}_{item_id}"
+    # Only mark as published if the platform actually accepted the post.
+    # If it failed, keep status as approved so the user can retry.
+    if post_id:
+        item.status = ContentStatus.published
+        item.published_at = _dt.utcnow()
+        item.platform_post_id = post_id
     await db.commit()
 
     await _write_audit(db, current_user.id, "publishing", "publish_dispatched", {
@@ -419,7 +422,7 @@ async def publish_content(
 
     if publish_error and not post_id:
         return {
-            "message": f"Content marked published but platform posting failed: {publish_error}",
+            "message": f"Platform posting failed — content remains approved so you can retry: {publish_error}",
             "content_item_id": item_id,
             "warning": publish_error,
         }
