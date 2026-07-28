@@ -386,9 +386,10 @@ async def publish_content(
     if account:
         try:
             prepared = await social_publishing_agent.prepare_post(item)
-            # Instagram requires a public URL — use the image-serving endpoint
+            # Instagram and TikTok require a public URL — base64 data URIs can't be
+            # fetched by either platform's PULL_FROM_URL mechanism.
             image_url = item.image_url
-            if platform == "instagram" and image_url and image_url.startswith("data:"):
+            if platform in ("instagram", "tiktok") and image_url and image_url.startswith("data:"):
                 base = (settings.api_base_url or "").rstrip("/")
                 image_url = f"{base}/api/content/{item_id}/image"
             post = PostPayload(
