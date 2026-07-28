@@ -57,7 +57,7 @@ _PLATFORM_CONFIG = {
     "tiktok": {
         "auth_url": "https://www.tiktok.com/v2/auth/authorize/",
         "token_url": "https://open.tiktokapis.com/v2/oauth/token/",
-        "scopes": "user.info.basic,video.publish,video.upload",
+        "scopes": "user.info.basic",
     },
 }
 
