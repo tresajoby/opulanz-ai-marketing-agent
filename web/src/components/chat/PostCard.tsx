@@ -119,8 +119,12 @@ export function PostCard({ item, onAction, onRevise }: PostCardProps) {
   async function handlePublish() {
     setLoading(true); setError(null);
     try {
-      await contentApi.publish(ci.id);
-      setPublished(true); onAction?.();
+      const result = await contentApi.publish(ci.id);
+      if (result?.warning) {
+        setError(`Publishing failed: ${result.warning}`);
+      } else {
+        setPublished(true); onAction?.();
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed");
     } finally { setLoading(false); }
