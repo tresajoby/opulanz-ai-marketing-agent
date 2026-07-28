@@ -162,8 +162,12 @@ async def connect_platform(
     if platform == "tiktok":
         params["client_key"] = client_id
         del params["client_id"]
-
-    url = cfg["auth_url"] + "?" + urllib.parse.urlencode(params)
+        # TikTok requires literal commas in the scope param — urlencode encodes them
+        # as %2C which TikTok rejects. Build the URL with scope appended raw.
+        scope = params.pop("scope")
+        url = cfg["auth_url"] + "?" + urllib.parse.urlencode(params) + "&scope=" + scope
+    else:
+        url = cfg["auth_url"] + "?" + urllib.parse.urlencode(params)
     return RedirectResponse(url=url)
 
 
