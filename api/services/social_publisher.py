@@ -249,6 +249,9 @@ class LinkedInPublisher:
 
 # ─── TikTok ───────────────────────────────────────────────────────────────────
 
+_VIDEO_EXTENSIONS = (".mp4", ".mov", ".webm", ".avi", ".mkv")
+
+
 class TikTokPublisher:
     BASE = "https://open.tiktokapis.com/v2"
 
@@ -259,6 +262,13 @@ class TikTokPublisher:
         if not post.image_url:
             raise ValueError("TikTok requires an image or video URL.")
 
+        url_clean = post.image_url.lower().split("?")[0]
+        if any(url_clean.endswith(ext) for ext in _VIDEO_EXTENSIONS):
+            return await self._publish_video(token, account.account_id, post)
+        return await self._publish_photo(token, account.account_id, post)
+
+    async def _publish_photo(self, token: str, account_id: str, post: PostPayload) -> str:
+        """Post image to TikTok as a photo post with auto-selected background music."""
         async with httpx.AsyncClient(timeout=60) as http:
             r = await http.post(
                 f"{self.BASE}/post/publish/content/init/",
@@ -266,6 +276,7 @@ class TikTokPublisher:
                     "post_info": {
                         "title": post.caption[:150],
                         "privacy_level": "PUBLIC_TO_EVERYONE",
+                        "auto_add_music": True,
                     },
                     "source_info": {
                         "source": "PULL_FROM_URL",
@@ -277,8 +288,37 @@ class TikTokPublisher:
                 },
                 headers={"Authorization": f"Bearer {token}"},
             )
+            if not r.is_success:
+                print(f"[OMMA] TikTok photo post error {r.status_code}: {r.text}")
             r.raise_for_status()
-            return r.json().get("data", {}).get("publish_id", account.account_id)
+            return r.json().get("data", {}).get("publish_id", account_id)
+
+    async def _publish_video(self, token: str, account_id: str, post: PostPayload) -> str:
+        """Post video to TikTok via PULL_FROM_URL. Video's own audio serves as sound."""
+        async with httpx.AsyncClient(timeout=120) as http:
+            r = await http.post(
+                f"{self.BASE}/post/publish/video/init/",
+                json={
+                    "post_info": {
+                        "title": post.caption[:150],
+                        "privacy_level": "PUBLIC_TO_EVERYONE",
+                        "disable_duet": False,
+                        "disable_comment": False,
+                        "disable_stitch": False,
+                    },
+                    "source_info": {
+                        "source": "PULL_FROM_URL",
+                        "video_url": post.image_url,
+                    },
+                    "post_mode": "DIRECT_POST",
+                    "media_type": "VIDEO",
+                },
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if not r.is_success:
+                print(f"[OMMA] TikTok video post error {r.status_code}: {r.text}")
+            r.raise_for_status()
+            return r.json().get("data", {}).get("publish_id", account_id)
 
 
 # ─── Dispatcher ───────────────────────────────────────────────────────────────
