@@ -4,68 +4,65 @@ import { useQuery } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { contentApi } from "@/lib/api";
-import { platformLabel, platformColor, statusColor, formatDate } from "@/lib/utils";
-import { BarChart3, TrendingUp, Send, Clock } from "lucide-react";
-import type { ContentStatus } from "@/types";
-
-const STATUS_ORDER: ContentStatus[] = ["published", "approved", "pending_review", "rejected"];
+import { analyticsApi, type PostMetric } from "@/lib/api";
+import { platformLabel, platformColor, formatDate } from "@/lib/utils";
+import { BarChart3, TrendingUp, Send, Heart, MessageCircle, Share2, Clock } from "lucide-react";
 
 export default function AnalyticsPage() {
-  const { data: allContent = [], isLoading } = useQuery({
-    queryKey: ["content-all"],
-    queryFn: () => contentApi.list(),
+  const { data, isLoading } = useQuery({
+    queryKey: ["analytics-summary"],
+    queryFn: () => analyticsApi.summary(),
+    staleTime: 2 * 60 * 1000,
   });
 
-  const byStatus = STATUS_ORDER.reduce<Record<string, number>>((acc, s) => {
-    acc[s] = allContent.filter((c) => c.status === s).length;
-    return acc;
-  }, {});
-
-  const byPlatform = allContent.reduce<Record<string, number>>((acc, c) => {
-    acc[c.platform] = (acc[c.platform] ?? 0) + 1;
-    return acc;
-  }, {});
-
-  const published = allContent.filter((c) => c.status === "published");
-  const avgConfidence =
-    allContent.length > 0
-      ? allContent.reduce((s, c) => s + (c.ai_confidence_score ?? 0), 0) / allContent.length
-      : 0;
+  const totals = data?.totals;
+  const byPlatform = data?.by_platform ?? {};
+  const postMetrics = data?.post_metrics ?? [];
+  const totalItems = Object.values(byPlatform).reduce((s, p) => s + p.generated, 0);
 
   return (
     <DashboardLayout title="Analytics">
       <div className="space-y-6">
-        {/* KPI row */}
+
+        {/* KPI row — content counts */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <KpiCard icon={Send} label="Published" value={byStatus.published ?? 0} color="text-indigo-600" bg="bg-indigo-50" />
-          <KpiCard icon={Clock} label="Pending Review" value={byStatus.pending_review ?? 0} color="text-amber-600" bg="bg-amber-50" />
-          <KpiCard icon={TrendingUp} label="Total Generated" value={allContent.length} color="text-blue-600" bg="bg-blue-50" />
+          <KpiCard icon={Send}      label="Published"        value={totals?.published ?? 0}      color="text-indigo-600" bg="bg-indigo-50" />
+          <KpiCard icon={Clock}     label="Pending Review"   value={totals?.pending_review ?? 0} color="text-amber-600"  bg="bg-amber-50"  />
+          <KpiCard icon={TrendingUp} label="Total Generated" value={totals?.generated ?? 0}      color="text-blue-600"   bg="bg-blue-50"   />
           <KpiCard
             icon={BarChart3}
             label="Avg AI Confidence"
-            value={`${Math.round(avgConfidence * 100)}%`}
+            value={totals ? `${Math.round((totals.avg_confidence) * 100)}%` : "—"}
             color="text-green-600"
             bg="bg-green-50"
           />
         </div>
 
+        {/* Engagement KPI row */}
+        <div className="grid grid-cols-3 gap-4">
+          <KpiCard icon={Heart}         label="Total Likes"    value={totals?.total_likes ?? 0}    color="text-rose-600"   bg="bg-rose-50"   />
+          <KpiCard icon={MessageCircle} label="Total Comments" value={totals?.total_comments ?? 0} color="text-purple-600" bg="bg-purple-50" />
+          <KpiCard icon={Share2}        label="Total Shares"   value={totals?.total_shares ?? 0}   color="text-teal-600"   bg="bg-teal-50"   />
+        </div>
+
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
           {/* By platform */}
           <Card>
-            <CardHeader><h3 className="font-semibold text-gray-900">Content by Platform</h3></CardHeader>
+            <CardHeader><h3 className="font-semibold text-gray-900">Posts by Platform</h3></CardHeader>
             <CardBody className="space-y-3">
-              {Object.entries(byPlatform).map(([platform, count]) => (
-                <div key={platform} className="flex items-center justify-between">
+              {Object.entries(byPlatform).map(([platform, counts]) => (
+                <div key={platform} className="flex items-center justify-between gap-3">
                   <Badge colorClass={platformColor(platform as never)}>{platformLabel(platform as never)}</Badge>
-                  <div className="flex items-center gap-2">
-                    <div className="w-24 h-2 rounded-full bg-gray-100 overflow-hidden">
+                  <div className="flex items-center gap-3 flex-1 justify-end">
+                    <div className="w-20 h-2 rounded-full bg-gray-100 overflow-hidden">
                       <div
                         className="h-full bg-indigo-500 rounded-full"
-                        style={{ width: `${(count / allContent.length) * 100}%` }}
+                        style={{ width: totalItems ? `${(counts.generated / totalItems) * 100}%` : "0%" }}
                       />
                     </div>
-                    <span className="text-sm font-medium text-gray-700 w-6 text-right">{count}</span>
+                    <span className="text-xs text-gray-500 w-20 text-right">
+                      {counts.published} published / {counts.generated} total
+                    </span>
                   </div>
                 </div>
               ))}
@@ -75,41 +72,79 @@ export default function AnalyticsPage() {
             </CardBody>
           </Card>
 
-          {/* By status */}
+          {/* Status breakdown */}
           <Card>
-            <CardHeader><h3 className="font-semibold text-gray-900">Content by Status</h3></CardHeader>
+            <CardHeader><h3 className="font-semibold text-gray-900">Content Status</h3></CardHeader>
             <CardBody className="space-y-3">
-              {STATUS_ORDER.map((s) => (
-                <div key={s} className="flex items-center justify-between">
-                  <Badge colorClass={statusColor(s)} className="capitalize">{s.replace(/_/g, " ")}</Badge>
-                  <span className="text-sm font-medium text-gray-700">{byStatus[s] ?? 0}</span>
+              {[
+                { label: "Published",      key: "published",      color: "text-indigo-600 bg-indigo-50" },
+                { label: "Approved",       key: "approved",       color: "text-green-600 bg-green-50" },
+                { label: "Pending Review", key: "pending_review", color: "text-amber-600 bg-amber-50" },
+                { label: "Rejected",       key: "rejected",       color: "text-red-600 bg-red-50" },
+              ].map(({ label, key, color }) => (
+                <div key={key} className="flex items-center justify-between">
+                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${color}`}>{label}</span>
+                  <span className="text-sm font-semibold text-gray-700">
+                    {totals ? (totals as Record<string, number>)[key] ?? 0 : 0}
+                  </span>
                 </div>
               ))}
             </CardBody>
           </Card>
         </div>
 
-        {/* Recent published */}
-        {published.length > 0 && (
+        {/* Published posts with engagement */}
+        {postMetrics.length > 0 && (
           <Card>
-            <CardHeader><h3 className="font-semibold text-gray-900">Recently Published</h3></CardHeader>
+            <CardHeader>
+              <h3 className="font-semibold text-gray-900">Post Performance</h3>
+              <p className="text-xs text-gray-400 mt-0.5">Live engagement from connected platforms</p>
+            </CardHeader>
             <CardBody className="divide-y divide-gray-50">
-              {published.slice(0, 8).map((c) => (
-                <div key={c.id} className="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
-                  <Badge colorClass={platformColor(c.platform)} className="shrink-0 mt-0.5">
-                    {platformLabel(c.platform)}
-                  </Badge>
-                  <p className="text-sm text-gray-700 flex-1 truncate">{c.text_body}</p>
-                  <span className="text-xs text-gray-400 shrink-0">{formatDate(c.created_at)}</span>
-                </div>
+              {postMetrics.map((p) => (
+                <PostMetricRow key={p.content_item_id} post={p} />
               ))}
             </CardBody>
           </Card>
         )}
 
-        {isLoading && <p className="text-gray-400 text-sm">Loading analytics…</p>}
+        {isLoading && (
+          <p className="text-gray-400 text-sm">Loading analytics…</p>
+        )}
       </div>
     </DashboardLayout>
+  );
+}
+
+function PostMetricRow({ post }: { post: PostMetric }) {
+  return (
+    <div className="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
+      <Badge colorClass={platformColor(post.platform as never)} className="shrink-0 mt-0.5">
+        {platformLabel(post.platform as never)}
+      </Badge>
+      <p className="text-sm text-gray-700 flex-1 line-clamp-1">{post.text_body}</p>
+      <div className="flex items-center gap-3 shrink-0 text-xs text-gray-500">
+        {post.likes !== null && (
+          <span className="flex items-center gap-1">
+            <Heart className="h-3 w-3 text-rose-400" /> {post.likes}
+          </span>
+        )}
+        {post.comments !== null && (
+          <span className="flex items-center gap-1">
+            <MessageCircle className="h-3 w-3 text-purple-400" /> {post.comments}
+          </span>
+        )}
+        {post.shares !== null && (
+          <span className="flex items-center gap-1">
+            <Share2 className="h-3 w-3 text-teal-400" /> {post.shares}
+          </span>
+        )}
+        {post.likes === null && post.comments === null && (
+          <span className="text-gray-300">no metrics</span>
+        )}
+        <span className="text-gray-300">{post.published_at ? formatDate(post.published_at) : ""}</span>
+      </div>
+    </div>
   );
 }
 

@@ -193,3 +193,40 @@ export const socialApi = {
       body: JSON.stringify({ platform, page_id: pageId, page_name: pageName, access_token: accessToken }),
     }),
 };
+
+// ─── Analytics ────────────────────────────────────────────────────────────────
+
+export interface PostMetric {
+  content_item_id: number;
+  platform: string;
+  text_body: string;
+  published_at: string | null;
+  platform_post_id: string;
+  likes: number | null;
+  comments: number | null;
+  shares: number | null;
+  impressions: number | null;
+}
+
+export interface AnalyticsSummary {
+  totals: {
+    generated: number;
+    published: number;
+    pending_review: number;
+    approved: number;
+    rejected: number;
+    avg_confidence: number;
+    total_likes: number;
+    total_comments: number;
+    total_shares: number;
+  };
+  by_platform: Record<string, { generated: number; published: number }>;
+  post_metrics: PostMetric[];
+}
+
+export const analyticsApi = {
+  summary: (brandId?: number) => {
+    const qs = brandId ? `?brand_id=${brandId}` : "";
+    return request<AnalyticsSummary>(`/api/analytics/summary${qs}`);
+  },
+};

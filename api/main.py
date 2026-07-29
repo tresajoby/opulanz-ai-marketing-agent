@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import init_db
-from .routers import auth, brands, content, social
+from .routers import auth, brands, content, social, analytics
 
 
 @asynccontextmanager
@@ -42,7 +42,8 @@ app.add_middleware(
 app.include_router(auth.router,    prefix="/api/auth",    tags=["Authentication"])
 app.include_router(brands.router,  prefix="/api/brands",  tags=["Brand Management"])
 app.include_router(content.router, prefix="/api/content", tags=["Content & Approvals"])
-app.include_router(social.router,  prefix="/api/social",  tags=["Social Media OAuth"])
+app.include_router(social.router,     prefix="/api/social",     tags=["Social Media OAuth"])
+app.include_router(analytics.router,  prefix="/api/analytics",  tags=["Analytics"])
 
 
 @app.get("/api/health", tags=["Health"])
