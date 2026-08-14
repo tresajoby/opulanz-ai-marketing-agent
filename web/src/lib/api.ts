@@ -162,7 +162,9 @@ export const contentApi = {
       body: JSON.stringify({ notes }),
     }),
   publish: (id: number) =>
-    request(`/api/content/${id}/publish`, { method: "POST" }),
+    request<{ message: string; content_item_id: number; post_id?: string; warning?: string }>(
+      `/api/content/${id}/publish`, { method: "POST" }
+    ),
   delete: (id: number) =>
     request(`/api/content/${id}`, { method: "DELETE" }),
   generateImage: (id: number, customPrompt?: string) =>
