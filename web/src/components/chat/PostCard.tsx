@@ -6,7 +6,7 @@ import { platformLabel, platformColor } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 import {
   Copy, CheckCircle, XCircle, RefreshCw, Rocket,
-  Hash, ImageIcon, Bot, Check, Loader2, Sparkles, Pencil, X,
+  Hash, ImageIcon, Bot, Check, Loader2, Sparkles, Pencil, X, Upload,
 } from "lucide-react";
 import type { ApprovalQueueItem } from "@/types";
 
@@ -52,6 +52,7 @@ export function PostCard({ item, onAction, onRevise }: PostCardProps) {
   const [localStatus, setLocalStatus] = useState(item.status);
   const [imageUrl, setImageUrl] = useState<string | null>(ci.image_url ?? null);
   const [imageLoading, setImageLoading] = useState(false);
+  const [uploadLoading, setUploadLoading] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
   const [editingPrompt, setEditingPrompt] = useState(false);
   const [promptDraft, setPromptDraft] = useState(ci.image_prompt ?? "");
@@ -116,6 +117,21 @@ export function PostCard({ item, onAction, onRevise }: PostCardProps) {
     } finally { setImageLoading(false); }
   }
 
+  async function handleUploadImage(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadLoading(true);
+    setImageError(null);
+    try {
+      const res = await contentApi.uploadImage(ci.id, file);
+      setImageUrl(res.image_url);
+    } catch (e: unknown) {
+      setImageError(e instanceof Error ? e.message : "Upload failed");
+    } finally {
+      setUploadLoading(false);
+    }
+  }
+
   async function handlePublish() {
     setLoading(true); setError(null);
     try {
@@ -160,74 +176,110 @@ export function PostCard({ item, onAction, onRevise }: PostCardProps) {
           </p>
         )}
 
-        {ci.image_prompt && (
+        {(ci.image_prompt || imageUrl || canAct) && (
           <div className="mt-3 space-y-2">
             {/* Prompt display / inline editor */}
-            <div className="bg-violet-50 rounded-lg px-3 py-2">
-              <div className="flex items-start gap-2">
-                <ImageIcon className="h-3.5 w-3.5 text-violet-500 mt-0.5 shrink-0" />
-                {editingPrompt ? (
-                  <div className="flex-1 space-y-2">
-                    <textarea
-                      value={promptDraft}
-                      onChange={(e) => setPromptDraft(e.target.value)}
-                      rows={4}
-                      className="w-full text-xs text-violet-900 bg-white border border-violet-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-400 resize-none"
-                    />
-                    <button
-                      onClick={() => { setEditingPrompt(false); setPromptDraft(ci.image_prompt ?? ""); }}
-                      className="flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:bg-gray-100 rounded"
-                    >
-                      <X className="h-3 w-3" /> Cancel
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex-1 flex items-start justify-between gap-2">
-                    <p className="text-xs text-violet-700 italic">{promptDraft}</p>
-                    <button
-                      onClick={() => setEditingPrompt(true)}
-                      className="shrink-0 p-1 rounded hover:bg-violet-100 text-violet-400 hover:text-violet-600 transition-colors"
-                      title="Edit image prompt"
-                    >
-                      <Pencil className="h-3 w-3" />
-                    </button>
-                  </div>
-                )}
+            {ci.image_prompt && (
+              <div className="bg-violet-50 rounded-lg px-3 py-2">
+                <div className="flex items-start gap-2">
+                  <ImageIcon className="h-3.5 w-3.5 text-violet-500 mt-0.5 shrink-0" />
+                  {editingPrompt ? (
+                    <div className="flex-1 space-y-2">
+                      <textarea
+                        value={promptDraft}
+                        onChange={(e) => setPromptDraft(e.target.value)}
+                        rows={4}
+                        className="w-full text-xs text-violet-900 bg-white border border-violet-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-400 resize-none"
+                      />
+                      <button
+                        onClick={() => { setEditingPrompt(false); setPromptDraft(ci.image_prompt ?? ""); }}
+                        className="flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:bg-gray-100 rounded"
+                      >
+                        <X className="h-3 w-3" /> Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex-1 flex items-start justify-between gap-2">
+                      <p className="text-xs text-violet-700 italic">{promptDraft}</p>
+                      <button
+                        onClick={() => setEditingPrompt(true)}
+                        className="shrink-0 p-1 rounded hover:bg-violet-100 text-violet-400 hover:text-violet-600 transition-colors"
+                        title="Edit image prompt"
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
 
-            {/* Generated image or generate button */}
+            {/* Generated image or upload button */}
             {imageUrl ? (
               <div className="space-y-2">
                 <img
                   src={imageUrl}
-                  alt="AI-generated"
-                  className="w-full rounded-lg border border-gray-200 object-cover"
+                  alt="Campaign Attachment"
+                  className="w-full rounded-lg border border-gray-200 object-cover max-h-96"
                 />
-                <button
-                  onClick={handleGenerateImage}
-                  disabled={imageLoading}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-100 text-violet-700 text-xs font-medium hover:bg-violet-200 disabled:opacity-50 transition-colors"
-                >
-                  {imageLoading
-                    ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Regenerating…</>
-                    : <><RefreshCw className="h-3.5 w-3.5" /> Regenerate Image</>
-                  }
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  {ci.image_prompt && (
+                    <button
+                      onClick={handleGenerateImage}
+                      disabled={imageLoading}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-100 text-violet-700 text-xs font-medium hover:bg-violet-200 disabled:opacity-50 transition-colors"
+                    >
+                      {imageLoading
+                        ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Regenerating…</>
+                        : <><RefreshCw className="h-3.5 w-3.5" /> Regenerate Image</>
+                      }
+                    </button>
+                  )}
+                  <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 text-xs font-medium hover:bg-gray-200 cursor-pointer transition-colors">
+                    {uploadLoading ? (
+                      <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Uploading…</>
+                    ) : (
+                      <><Upload className="h-3.5 w-3.5" /> Upload Custom Image</>
+                    )}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleUploadImage}
+                      className="hidden"
+                      disabled={uploadLoading}
+                    />
+                  </label>
+                </div>
                 {imageError && <p className="mt-1 text-xs text-red-600">{imageError}</p>}
               </div>
             ) : (
-              <div>
-                <button
-                  onClick={handleGenerateImage}
-                  disabled={imageLoading}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700 disabled:opacity-50 transition-colors"
-                >
-                  {imageLoading
-                    ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Generating…</>
-                    : <><Sparkles className="h-3.5 w-3.5" /> Generate Image</>
-                  }
-                </button>
+              <div className="flex flex-wrap gap-2">
+                {ci.image_prompt && (
+                  <button
+                    onClick={handleGenerateImage}
+                    disabled={imageLoading}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700 disabled:opacity-50 transition-colors"
+                  >
+                    {imageLoading
+                      ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Generating…</>
+                      : <><Sparkles className="h-3.5 w-3.5" /> Generate Image</>
+                    }
+                  </button>
+                )}
+                <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 text-xs font-medium hover:bg-gray-200 cursor-pointer transition-colors">
+                  {uploadLoading ? (
+                    <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Uploading…</>
+                  ) : (
+                    <><Upload className="h-3.5 w-3.5" /> Upload Custom Image</>
+                  )}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleUploadImage}
+                    className="hidden"
+                    disabled={uploadLoading}
+                  />
+                </label>
                 {imageError && <p className="mt-1 text-xs text-red-600">{imageError}</p>}
               </div>
             )}

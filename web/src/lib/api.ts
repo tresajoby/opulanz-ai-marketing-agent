@@ -176,6 +176,21 @@ export const contentApi = {
       },
       60_000,
     ),
+  uploadImage: async (id: number, file: File): Promise<ContentItem> => {
+    const token = getToken();
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${BASE}/api/content/${id}/upload-image`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: `${res.status}` }));
+      throw new Error(err.detail ?? "Upload failed");
+    }
+    return res.json();
+  },
 };
 
 // ─── Social (n8n-managed) ─────────────────────────────────────────────────────
