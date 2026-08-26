@@ -1,18 +1,26 @@
 "use client";
 
-import { useState } from "react";
-import { contentApi } from "@/lib/api";
-import { platformLabel, platformColor } from "@/lib/utils";
+import { useEffect, useState } from "react";
+import { contentApi, normalizeContentImageUrl } from "@/lib/api";
+import { platformLabel } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 import {
   Copy, CheckCircle, XCircle, RefreshCw, Rocket,
   Hash, ImageIcon, Bot, Check, Loader2, Sparkles, Pencil, X, Upload,
 } from "lucide-react";
-import type { ApprovalQueueItem } from "@/types";
+import type { ApprovalQueueItem, ApprovalStatus } from "@/types";
+
+export interface PostCardUpdate {
+  status?: ApprovalStatus;
+  image_url?: string | null;
+  image_prompt?: string | null;
+  published?: boolean;
+}
 
 interface PostCardProps {
   item: ApprovalQueueItem;
   onAction?: () => void;
+  onItemUpdate?: (queueItemId: number, patch: PostCardUpdate) => void;
   onRevise?: (notes: string, originalText: string, platform: string) => void;
 }
 
@@ -38,7 +46,7 @@ const PLATFORM_COLORS: Record<string, string> = {
   google_ads: "bg-green-600",
 };
 
-export function PostCard({ item, onAction, onRevise }: PostCardProps) {
+export function PostCard({ item, onAction, onItemUpdate, onRevise }: PostCardProps) {
   const { user } = useAuth();
   const ci = item.content_item;
   const canAct = user?.role === "super_admin" || user?.role === "marketing_manager";
@@ -48,18 +56,45 @@ export function PostCard({ item, onAction, onRevise }: PostCardProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [published, setPublished] = useState(false);
-  const [localStatus, setLocalStatus] = useState(item.status);
-  const [imageUrl, setImageUrl] = useState<string | null>(ci.image_url ?? null);
+  const [published, setPublished] = useState(
+    ci.status === "published" || Boolean(ci.published_at),
+  );
+  const [localStatus, setLocalStatus] = useState<ApprovalStatus>(item.status);
+  const [imageUrl, setImageUrl] = useState<string | null>(
+    normalizeContentImageUrl(ci.id, ci.image_url),
+  );
   const [imageLoading, setImageLoading] = useState(false);
+  const [imageStage, setImageStage] = useState<string | null>(null);
   const [uploadLoading, setUploadLoading] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
   const [editingPrompt, setEditingPrompt] = useState(false);
   const [promptDraft, setPromptDraft] = useState(ci.image_prompt ?? "");
 
+  // Keep local UI in sync when parent hydrates fresh server state (e.g. after tab nav)
+  useEffect(() => {
+    setLocalStatus(item.status);
+  }, [item.status, item.id]);
+
+  useEffect(() => {
+    setImageUrl(normalizeContentImageUrl(ci.id, ci.image_url));
+  }, [ci.id, ci.image_url]);
+
+  useEffect(() => {
+    setPromptDraft(ci.image_prompt ?? "");
+  }, [ci.image_prompt]);
+
+  useEffect(() => {
+    if (ci.status === "published" || ci.published_at) setPublished(true);
+  }, [ci.status, ci.published_at]);
+
   const confidence = ci.ai_confidence_score ?? null;
   const compliance = ci.generation_metadata?.compliance_score as number | null ?? null;
   const variantLabel = ci.generation_metadata?.variant_label as string ?? "";
+
+  function notifyUpdate(patch: PostCardUpdate) {
+    onItemUpdate?.(item.id, patch);
+    onAction?.();
+  }
 
   function copyText() {
     const full = [ci.text_body, ci.hashtags].filter(Boolean).join("\n\n");
@@ -73,7 +108,7 @@ export function PostCard({ item, onAction, onRevise }: PostCardProps) {
     try {
       await contentApi.approve(ci.id, comment);
       setLocalStatus("approved"); setMode("view"); setComment("");
-      onAction?.();
+      notifyUpdate({ status: "approved" });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed");
     } finally { setLoading(false); }
@@ -85,7 +120,7 @@ export function PostCard({ item, onAction, onRevise }: PostCardProps) {
     try {
       await contentApi.reject(ci.id, comment);
       setLocalStatus("rejected"); setMode("view"); setComment("");
-      onAction?.();
+      notifyUpdate({ status: "rejected" });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed");
     } finally { setLoading(false); }
@@ -97,9 +132,9 @@ export function PostCard({ item, onAction, onRevise }: PostCardProps) {
     try {
       await contentApi.requestRevision(ci.id, comment);
       setLocalStatus("revision_requested"); setMode("view");
+      notifyUpdate({ status: "revision_requested" });
       onRevise?.(comment, ci.text_body, ci.platform);
       setComment("");
-      onAction?.();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed");
     } finally { setLoading(false); }
@@ -107,14 +142,30 @@ export function PostCard({ item, onAction, onRevise }: PostCardProps) {
 
   async function handleGenerateImage() {
     setEditingPrompt(false);
-    setImageLoading(true); setImageError(null);
+    setImageLoading(true);
+    setImageError(null);
+    setImageStage("Preparing prompt…");
+    const stageTimer = window.setTimeout(() => setImageStage("Generating image…"), 2500);
+    const stageTimer2 = window.setTimeout(() => setImageStage("Almost done — applying brand finish…"), 12000);
     try {
-      const customPrompt = promptDraft.trim() !== ci.image_prompt?.trim() ? promptDraft.trim() : undefined;
+      const customPrompt = promptDraft.trim() !== (ci.image_prompt ?? "").trim()
+        ? promptDraft.trim()
+        : undefined;
       const res = await contentApi.generateImage(ci.id, customPrompt);
-      setImageUrl(res.image_url);
+      const nextUrl = normalizeContentImageUrl(ci.id, res.image_url) ?? res.image_url;
+      setImageUrl(nextUrl);
+      notifyUpdate({
+        image_url: nextUrl,
+        image_prompt: customPrompt ?? ci.image_prompt,
+      });
     } catch (e: unknown) {
       setImageError(e instanceof Error ? e.message : "Image generation failed");
-    } finally { setImageLoading(false); }
+    } finally {
+      window.clearTimeout(stageTimer);
+      window.clearTimeout(stageTimer2);
+      setImageStage(null);
+      setImageLoading(false);
+    }
   }
 
   async function handleUploadImage(e: React.ChangeEvent<HTMLInputElement>) {
@@ -124,11 +175,14 @@ export function PostCard({ item, onAction, onRevise }: PostCardProps) {
     setImageError(null);
     try {
       const res = await contentApi.uploadImage(ci.id, file);
-      setImageUrl(res.image_url);
+      const nextUrl = normalizeContentImageUrl(ci.id, res.image_url) ?? res.image_url;
+      setImageUrl(nextUrl);
+      notifyUpdate({ image_url: nextUrl });
     } catch (e: unknown) {
       setImageError(e instanceof Error ? e.message : "Upload failed");
     } finally {
       setUploadLoading(false);
+      e.target.value = "";
     }
   }
 
@@ -139,7 +193,8 @@ export function PostCard({ item, onAction, onRevise }: PostCardProps) {
       if (result?.warning) {
         setError(`Publishing failed: ${result.warning}`);
       } else {
-        setPublished(true); onAction?.();
+        setPublished(true);
+        notifyUpdate({ published: true, status: "approved" });
       }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed");
@@ -179,7 +234,7 @@ export function PostCard({ item, onAction, onRevise }: PostCardProps) {
         {(ci.image_prompt || imageUrl || canAct) && (
           <div className="mt-3 space-y-2">
             {/* Prompt display / inline editor */}
-            {ci.image_prompt && (
+            {(ci.image_prompt || promptDraft) && (
               <div className="bg-violet-50 rounded-lg px-3 py-2">
                 <div className="flex items-start gap-2">
                   <ImageIcon className="h-3.5 w-3.5 text-violet-500 mt-0.5 shrink-0" />
@@ -221,12 +276,16 @@ export function PostCard({ item, onAction, onRevise }: PostCardProps) {
                   src={imageUrl}
                   alt="Campaign Attachment"
                   className="w-full rounded-lg border border-gray-200 object-cover max-h-96"
+                  onError={() => {
+                    setImageError("Could not load image. Try regenerating.");
+                    setImageUrl(null);
+                  }}
                 />
                 <div className="flex flex-wrap gap-2">
-                  {ci.image_prompt && (
+                  {(ci.image_prompt || promptDraft) && (
                     <button
                       onClick={handleGenerateImage}
-                      disabled={imageLoading}
+                      disabled={imageLoading || uploadLoading}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-100 text-violet-700 text-xs font-medium hover:bg-violet-200 disabled:opacity-50 transition-colors"
                     >
                       {imageLoading
@@ -246,41 +305,79 @@ export function PostCard({ item, onAction, onRevise }: PostCardProps) {
                       accept="image/*"
                       onChange={handleUploadImage}
                       className="hidden"
-                      disabled={uploadLoading}
+                      disabled={uploadLoading || imageLoading}
                     />
                   </label>
                 </div>
-                {imageError && <p className="mt-1 text-xs text-red-600">{imageError}</p>}
+                {imageLoading && imageStage && (
+                  <p className="text-xs text-violet-600 flex items-center gap-1.5">
+                    <Loader2 className="h-3 w-3 animate-spin" /> {imageStage}
+                  </p>
+                )}
+                {imageError && (
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-xs text-red-600">{imageError}</p>
+                    <button
+                      onClick={handleGenerateImage}
+                      disabled={imageLoading}
+                      className="shrink-0 text-xs font-medium text-violet-600 hover:text-violet-800"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
-              <div className="flex flex-wrap gap-2">
-                {ci.image_prompt && (
-                  <button
-                    onClick={handleGenerateImage}
-                    disabled={imageLoading}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700 disabled:opacity-50 transition-colors"
-                  >
-                    {imageLoading
-                      ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Generating…</>
-                      : <><Sparkles className="h-3.5 w-3.5" /> Generate Image</>
-                    }
-                  </button>
-                )}
-                <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 text-xs font-medium hover:bg-gray-200 cursor-pointer transition-colors">
-                  {uploadLoading ? (
-                    <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Uploading…</>
-                  ) : (
-                    <><Upload className="h-3.5 w-3.5" /> Upload Custom Image</>
+              <div className="space-y-2">
+                <div className="flex flex-wrap gap-2">
+                  {(ci.image_prompt || promptDraft) && (
+                    <button
+                      onClick={handleGenerateImage}
+                      disabled={imageLoading || uploadLoading}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700 disabled:opacity-50 transition-colors"
+                    >
+                      {imageLoading
+                        ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Generating…</>
+                        : <><Sparkles className="h-3.5 w-3.5" /> Generate Image</>
+                      }
+                    </button>
                   )}
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleUploadImage}
-                    className="hidden"
-                    disabled={uploadLoading}
-                  />
-                </label>
-                {imageError && <p className="mt-1 text-xs text-red-600">{imageError}</p>}
+                  <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 text-xs font-medium hover:bg-gray-200 cursor-pointer transition-colors">
+                    {uploadLoading ? (
+                      <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Uploading…</>
+                    ) : (
+                      <><Upload className="h-3.5 w-3.5" /> Upload Custom Image</>
+                    )}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleUploadImage}
+                      className="hidden"
+                      disabled={uploadLoading || imageLoading}
+                    />
+                  </label>
+                </div>
+                {imageLoading && (
+                  <div className="rounded-lg border border-dashed border-violet-200 bg-violet-50/60 px-3 py-6 text-center">
+                    <Loader2 className="h-5 w-5 animate-spin text-violet-500 mx-auto mb-2" />
+                    <p className="text-xs font-medium text-violet-700">
+                      {imageStage ?? "Generating image…"}
+                    </p>
+                    <p className="text-[10px] text-violet-500 mt-1">This usually takes 15–45 seconds</p>
+                  </div>
+                )}
+                {imageError && (
+                  <div className="flex items-start justify-between gap-2 rounded-lg bg-red-50 border border-red-100 px-3 py-2">
+                    <p className="text-xs text-red-600">{imageError}</p>
+                    <button
+                      onClick={handleGenerateImage}
+                      disabled={imageLoading}
+                      className="shrink-0 text-xs font-medium text-violet-600 hover:text-violet-800"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -404,6 +501,7 @@ export function PostCard({ item, onAction, onRevise }: PostCardProps) {
             <Rocket className="h-3.5 w-3.5" />
             {loading ? "Publishing…" : "Publish Now"}
           </button>
+          {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
         </div>
       )}
       {published && (

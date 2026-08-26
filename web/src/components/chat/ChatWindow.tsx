@@ -2,17 +2,105 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { brandsApi, contentApi } from "@/lib/api";
+import { brandsApi, contentApi, normalizeContentImageUrl } from "@/lib/api";
 import { ServicesPanel } from "./ServicesPanel";
 import { TypingIndicator } from "./TypingIndicator";
-import { PostCard } from "./PostCard";
+import { PostCard, type PostCardUpdate } from "./PostCard";
 import type { ChatMessage, UserMessage, ThinkingMessage, ContentMessage, SystemMessage } from "./types";
-import type { Platform, ApprovalQueueItem, ConversationTurn } from "@/types";
+import type { Platform, ApprovalQueueItem, ApprovalStatus, ContentStatus, ConversationTurn } from "@/types";
 import { Sparkles, Send, Bot, ChevronDown, AlertTriangle, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 let _msgId = 0;
 function newId() { return String(++_msgId); }
+
+function contentStatusToApproval(status: ContentStatus): ApprovalStatus {
+  switch (status) {
+    case "approved":
+    case "published":
+      return "approved";
+    case "rejected":
+      return "rejected";
+    case "revision_requested":
+      return "revision_requested";
+    default:
+      return "pending";
+  }
+}
+
+/** Strip multi-MB data URLs before writing chat history to localStorage. */
+function sanitizeMessagesForStorage(messages: ChatMessage[]): ChatMessage[] {
+  return messages.map((m) => {
+    if (m.role !== "assistant") return m;
+    const am = m as ContentMessage;
+    return {
+      ...am,
+      items: am.items.map((item) => ({
+        ...item,
+        content_item: {
+          ...item.content_item,
+          image_url: item.content_item.image_url?.startsWith("data:")
+            ? normalizeContentImageUrl(item.content_item.id, item.content_item.image_url)
+            : item.content_item.image_url,
+        },
+      })),
+    };
+  });
+}
+
+async function hydrateMessagesFromServer(
+  messages: ChatMessage[],
+  brandId: number,
+): Promise<ChatMessage[]> {
+  const contentIds = new Set<number>();
+  for (const m of messages) {
+    if (m.role === "assistant") {
+      for (const item of (m as ContentMessage).items) {
+        contentIds.add(item.content_item_id || item.content_item.id);
+      }
+    }
+  }
+  if (contentIds.size === 0) return messages;
+
+  try {
+    const [allContent, queue] = await Promise.all([
+      contentApi.list({ brand_id: brandId }),
+      contentApi.queue(brandId).catch(() => [] as ApprovalQueueItem[]),
+    ]);
+    const byContentId = new Map(allContent.map((c) => [c.id, c]));
+    const queueByContentId = new Map(queue.map((q) => [q.content_item_id, q]));
+
+    return messages.map((m) => {
+      if (m.role !== "assistant") return m;
+      const am = m as ContentMessage;
+      return {
+        ...am,
+        items: am.items.map((item) => {
+          const cid = item.content_item_id || item.content_item.id;
+          const fresh = byContentId.get(cid);
+          if (!fresh) return item;
+          const queueRow = queueByContentId.get(cid);
+          const status: ApprovalStatus = queueRow
+            ? queueRow.status
+            : contentStatusToApproval(fresh.status);
+          return {
+            ...item,
+            status,
+            content_item: {
+              ...item.content_item,
+              ...fresh,
+              image_url: fresh.image_url
+                ? normalizeContentImageUrl(fresh.id, fresh.image_url)
+                : null,
+            },
+          };
+        }),
+      };
+    });
+  } catch {
+    return messages;
+  }
+}
 
 function WelcomeScreen({ brandCount }: { brandCount: number }) {
   return (
@@ -70,40 +158,95 @@ export function ChatWindow() {
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const hydrateGen = useRef(0);
 
   useEffect(() => {
     if (brands.length > 0 && !brandId) setBrandId(String(brands[0].id));
   }, [brands, brandId]);
 
-  // Restore saved chat when brand changes
+  // Restore saved chat when brand changes, then re-sync status/images from the server
   useEffect(() => {
     if (!brandId) return;
+    const gen = ++hydrateGen.current;
     try {
       const saved = localStorage.getItem(`omma_chat_${brandId}`);
       if (saved) {
         const data = JSON.parse(saved);
-        setMessages((data.messages || []).map((m: ChatMessage) => ({ ...m, timestamp: new Date((m as any).timestamp) })));
+        const restored: ChatMessage[] = (data.messages || []).map((m: ChatMessage) => ({
+          ...m,
+          timestamp: new Date((m as unknown as { timestamp: string }).timestamp),
+        }));
+        setMessages(restored);
         setConversationHistory(data.conversationHistory || []);
+
+        void hydrateMessagesFromServer(restored, Number(brandId)).then((hydrated) => {
+          if (hydrateGen.current !== gen) return;
+          setMessages(hydrated);
+        });
       } else {
         setMessages([]);
         setConversationHistory([]);
       }
-    } catch { /* ignore */ }
+    } catch {
+      setMessages([]);
+      setConversationHistory([]);
+    }
   }, [brandId]);
 
-  // Persist chat after each completed turn
+  // Persist chat after each completed turn (never store raw data: URLs)
   useEffect(() => {
     if (!brandId || loading) return;
     const toSave = messages.filter((m) => m.role !== "thinking");
     if (toSave.length === 0) { localStorage.removeItem(`omma_chat_${brandId}`); return; }
     try {
-      localStorage.setItem(`omma_chat_${brandId}`, JSON.stringify({ messages: toSave, conversationHistory }));
+      localStorage.setItem(
+        `omma_chat_${brandId}`,
+        JSON.stringify({
+          messages: sanitizeMessagesForStorage(toSave),
+          conversationHistory,
+        }),
+      );
     } catch { /* ignore quota errors */ }
   }, [messages, conversationHistory, brandId, loading]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
+
+  const handleItemUpdate = useCallback((queueItemId: number, patch: PostCardUpdate) => {
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.role !== "assistant") return m;
+        const am = m as ContentMessage;
+        if (!am.items.some((i) => i.id === queueItemId)) return m;
+        return {
+          ...am,
+          items: am.items.map((item) => {
+            if (item.id !== queueItemId) return item;
+            return {
+              ...item,
+              status: patch.status ?? item.status,
+              content_item: {
+                ...item.content_item,
+                status:
+                  patch.status === "approved"
+                    ? "approved"
+                    : patch.status === "rejected"
+                      ? "rejected"
+                      : patch.status === "revision_requested"
+                        ? "revision_requested"
+                        : item.content_item.status,
+                image_url: patch.image_url !== undefined ? patch.image_url : item.content_item.image_url,
+                image_prompt: patch.image_prompt !== undefined ? patch.image_prompt : item.content_item.image_prompt,
+                published_at: patch.published ? new Date().toISOString() : item.content_item.published_at,
+              },
+            };
+          }),
+        };
+      }),
+    );
+    qc.invalidateQueries({ queryKey: ["queue"] });
+  }, [qc]);
 
   function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     setInput(e.target.value);
@@ -205,7 +348,6 @@ export function ChatWindow() {
     if (textareaRef.current) textareaRef.current.style.height = "auto";
     setLoading(true);
 
-    // Append user turn to history before sending
     const updatedHistory: ConversationTurn[] = [
       ...conversationHistory,
       { role: "user", content: text },
@@ -220,8 +362,6 @@ export function ChatWindow() {
         conversation_history: updatedHistory,
       });
 
-      // Fetch queue items to display cards — wrapped in try/catch so a queue
-      // fetch failure doesn't hide the fact that generation succeeded
       let items: ApprovalQueueItem[] = [];
       try {
         if (result.approval_queue_ids?.length > 0) {
@@ -233,7 +373,6 @@ export function ChatWindow() {
         // Queue fetch failed — cards won't show but generation did succeed
       }
 
-      // Append assistant turn so next message has full context
       const assistantContent = buildAssistantHistoryContent(items, platform);
       setConversationHistory([
         ...updatedHistory,
@@ -247,7 +386,6 @@ export function ChatWindow() {
       };
       setMessages((prev) => prev.map((m) => (m.id === thinkingId ? contentMsg : m)));
 
-      // Keep queue in sync
       qc.invalidateQueries({ queryKey: ["queue"] });
     } catch (err: unknown) {
       const errText = err instanceof Error ? err.message : "Something went wrong. Please try again.";
@@ -271,10 +409,8 @@ export function ChatWindow() {
 
   return (
     <div className="flex h-full gap-5">
-      {/* ── Chat area ─────────────────────────────────────── */}
       <div className="flex flex-col flex-1 min-w-0 bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
 
-        {/* Top bar */}
         <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 bg-gray-50 shrink-0">
           <div className="flex items-center gap-2">
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-600">
@@ -299,11 +435,10 @@ export function ChatWindow() {
                 New chat
               </button>
             )}
-            {/* Brand selector */}
             <div className="relative">
               <select
                 value={brandId}
-                onChange={(e) => { setBrandId(e.target.value); handleClearConversation(); }}
+                onChange={(e) => setBrandId(e.target.value)}
                 className="appearance-none pl-3 pr-8 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
               >
                 {brandOptions.length === 0 && <option value="">No brands — create one first</option>}
@@ -316,7 +451,6 @@ export function ChatWindow() {
           </div>
         </div>
 
-        {/* Messages */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
           {messages.length === 0 ? (
             <WelcomeScreen brandCount={brands.length} />
@@ -365,7 +499,7 @@ export function ChatWindow() {
                         Generated {am.items.length} variant{am.items.length !== 1 ? "s" : ""} for{" "}
                         <span className="font-medium capitalize">{am.platform.replace("_", " ")}</span>
                         {" · "}
-                        <span className="text-indigo-500">Reply to refine or start fresh with "New chat"</span>
+                        <span className="text-indigo-500">Reply to refine or start fresh with &quot;New chat&quot;</span>
                       </p>
                       {am.warnings.length > 0 && (
                         <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
@@ -385,7 +519,12 @@ export function ChatWindow() {
                       )}
                       <div className="grid gap-3 grid-cols-1">
                         {am.items.map((item) => (
-                          <PostCard key={item.id} item={item} onRevise={handleRevisionRequest} />
+                          <PostCard
+                            key={item.id}
+                            item={item}
+                            onItemUpdate={handleItemUpdate}
+                            onRevise={handleRevisionRequest}
+                          />
                         ))}
                       </div>
                     </div>
@@ -412,11 +551,10 @@ export function ChatWindow() {
           )}
         </div>
 
-        {/* Input bar */}
         <div className="shrink-0 border-t border-gray-100 bg-white px-4 py-3">
           {isRefinement && (
             <p className="text-[10px] text-indigo-500 mb-2 px-1">
-              💬 You can refine — e.g. "Make them shorter", "Add more urgency", "Rewrite for a younger audience"
+              💬 You can refine — e.g. &quot;Make them shorter&quot;, &quot;Add more urgency&quot;, &quot;Rewrite for a younger audience&quot;
             </p>
           )}
           <div className="flex items-end gap-3 bg-gray-50 border border-gray-200 rounded-2xl px-4 py-3 focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100 transition-all">
@@ -453,7 +591,6 @@ export function ChatWindow() {
         </div>
       </div>
 
-      {/* ── Services panel ──────────────────────────────── */}
       <ServicesPanel
         activePlatform={platform}
         onPlatformChange={setPlatform}

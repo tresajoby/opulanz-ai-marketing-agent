@@ -42,10 +42,42 @@ async function request<T>(
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: `${res.status} ${res.statusText}` }));
-    throw new Error(err.detail ?? "Request failed");
+    const detail = err?.detail;
+    const message =
+      typeof detail === "string"
+        ? detail
+        : Array.isArray(detail)
+          ? detail.map((d: { msg?: string } | string) =>
+              typeof d === "string" ? d : d?.msg ?? JSON.stringify(d),
+            ).join("; ")
+          : detail && typeof detail === "object" && "msg" in detail
+            ? String((detail as { msg: string }).msg)
+            : "Request failed";
+    throw new Error(message);
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
+}
+
+/** Stable display URL for a content item image (avoids huge base64 payloads in UI state). */
+export function contentImageUrl(contentItemId: number, bustCache = false): string {
+  const url = `${BASE}/api/content/${contentItemId}/image`;
+  return bustCache ? `${url}?v=${Date.now()}` : url;
+}
+
+export function normalizeContentImageUrl(
+  contentItemId: number,
+  imageUrl: string | null | undefined,
+): string | null {
+  if (!imageUrl) return null;
+  // Prefer the public proxy for data URLs / expired OpenAI links stored server-side
+  if (imageUrl.startsWith("data:") || imageUrl.includes("oaidalleapiprodscus") || imageUrl.includes("openai.com")) {
+    return contentImageUrl(contentItemId, true);
+  }
+  if (imageUrl.startsWith("/")) {
+    return `${BASE}${imageUrl}${imageUrl.includes("?") ? "&" : "?"}v=${Date.now()}`;
+  }
+  return imageUrl;
 }
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -174,22 +206,36 @@ export const contentApi = {
         method: "POST",
         body: JSON.stringify({ custom_prompt: customPrompt ?? null }),
       },
-      60_000,
+      // Claude expansion + image model + compositing regularly exceeds 60s
+      180_000,
     ),
   uploadImage: async (id: number, file: File): Promise<ContentItem> => {
     const token = getToken();
     const form = new FormData();
     form.append("file", file);
-    const res = await fetch(`${BASE}/api/content/${id}/upload-image`, {
-      method: "POST",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      body: form,
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: `${res.status}` }));
-      throw new Error(err.detail ?? "Upload failed");
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 120_000);
+    try {
+      const res = await fetch(`${BASE}/api/content/${id}/upload-image`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: form,
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: `${res.status}` }));
+        const detail = err?.detail;
+        throw new Error(typeof detail === "string" ? detail : "Upload failed");
+      }
+      return res.json();
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        throw new Error("Upload timed out — try a smaller image.");
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
     }
-    return res.json();
   },
 };
 
