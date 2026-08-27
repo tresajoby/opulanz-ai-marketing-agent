@@ -350,6 +350,33 @@ async def _handle_meta_callback(
                         ig_name = ig_accounts[0].get("name", "Instagram")
                         page_token = user_token
 
+            # Try 4: use the already-connected Facebook page token stored in DB
+            # (handles Business Manager pages where me/accounts returns empty)
+            if not ig_id:
+                from sqlalchemy import select as _select
+                fb_acct_result = await db.execute(
+                    _select(SocialAccount).where(
+                        SocialAccount.brand_id == brand_id,
+                        SocialAccount.platform == "facebook",
+                    )
+                )
+                fb_acct = fb_acct_result.scalar_one_or_none()
+                if fb_acct:
+                    fb_page_token = decrypt(fb_acct.access_token)
+                    fb_page_id = fb_acct.account_id
+                    print(f"[OMMA] Try 4: querying FB page {fb_page_id} for linked IG account")
+                    page_ig_r = await http.get(
+                        f"https://graph.facebook.com/v18.0/{fb_page_id}",
+                        params={"fields": "instagram_business_account,name", "access_token": fb_page_token},
+                    )
+                    print(f"[OMMA] Try 4 response: {page_ig_r.status_code} {page_ig_r.text[:300]}")
+                    if page_ig_r.is_success:
+                        page_data = page_ig_r.json()
+                        if "instagram_business_account" in page_data:
+                            ig_id = page_data["instagram_business_account"]["id"]
+                            ig_name = page_data.get("name", "Instagram")
+                            page_token = fb_page_token
+
             if not ig_id:
                 raise Exception(
                     "No Instagram Business account found linked to your Facebook pages. "
