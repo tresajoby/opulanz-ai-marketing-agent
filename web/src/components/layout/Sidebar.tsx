@@ -13,15 +13,18 @@ import {
   LogOut,
   Zap,
   MessageSquare,
+  HelpCircle,
 } from "lucide-react";
 
 const navItems = [
-  { href: "/chat",      label: "AI Chat Studio", icon: MessageSquare },
+  { href: "/chat", label: "AI Chat Studio", icon: MessageSquare },
   { href: "/dashboard", label: "Command Center", icon: LayoutDashboard },
-  { href: "/queue",     label: "Approval Queue", icon: ClipboardCheck },
-  { href: "/brands",    label: "Brand Management", icon: Building2 },
+  { href: "/queue", label: "Approval Queue", icon: ClipboardCheck },
+  { href: "/brands", label: "Brand Management", icon: Building2 },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
+  { href: "/faq", label: "Help & FAQ", icon: HelpCircle },
 ];
+
 
 export function Sidebar() {
   const pathname = usePathname();
