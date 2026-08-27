@@ -97,22 +97,25 @@ class MetaPublisher:
             qs = parse_qs(urlparse(page_id).query)
             page_id = qs.get("id", [page_id])[0]
 
-        async with httpx.AsyncClient(timeout=30) as http:
-            if post.image_url and post.image_url.startswith("data:"):
-                # Base64 image — upload as binary multipart, too long for a URL query param
-                import base64
-                _, b64data = post.image_url.split(",", 1)
-                image_bytes = base64.b64decode(b64data)
-                r = await http.post(
-                    f"{self.BASE}/{page_id}/photos",
-                    data={"message": post.caption, "access_token": token},
-                    files={"source": ("image.png", image_bytes, "image/png")},
-                )
-            elif post.image_url:
-                r = await http.post(
-                    f"{self.BASE}/{page_id}/photos",
-                    params={"url": post.image_url, "message": post.caption, "access_token": token},
-                )
+        async with httpx.AsyncClient(timeout=60) as http:
+            if post.image_url:
+                # Always upload images as multipart binary — the ?url= approach
+                # fails whenever Facebook can't reach the URL (localhost, stale
+                # production hosts, base64 data URIs, etc.).
+                image_bytes = await self._resolve_image_bytes(http, post.image_url)
+                if image_bytes:
+                    r = await http.post(
+                        f"{self.BASE}/{page_id}/photos",
+                        data={"message": post.caption, "access_token": token},
+                        files={"source": ("image.png", image_bytes, "image/png")},
+                    )
+                else:
+                    # Fallback: couldn't download — try text-only post
+                    print(f"[OMMA] Could not resolve image, falling back to text-only post")
+                    r = await http.post(
+                        f"{self.BASE}/{page_id}/feed",
+                        params={"message": post.caption, "access_token": token},
+                    )
             else:
                 r = await http.post(
                     f"{self.BASE}/{page_id}/feed",
@@ -123,6 +126,36 @@ class MetaPublisher:
             r.raise_for_status()
             data = r.json()
             return data.get("post_id") or data.get("id", "")
+
+    @staticmethod
+    async def _resolve_image_bytes(http: httpx.AsyncClient, image_url: str) -> bytes | None:
+        """Convert any image source (base64 data URI, HTTP URL) into raw bytes."""
+        import base64
+
+        if not image_url:
+            return None
+
+        # 1. Base64 data URI
+        if image_url.startswith("data:"):
+            try:
+                _, b64data = image_url.split(",", 1)
+                return base64.b64decode(b64data)
+            except Exception as exc:
+                print(f"[OMMA] Failed to decode base64 image: {exc}")
+                return None
+
+        # 2. HTTP(S) URL — download it server-side
+        if image_url.startswith("http"):
+            try:
+                resp = await http.get(image_url, follow_redirects=True)
+                if resp.is_success:
+                    return resp.content
+                print(f"[OMMA] Image download failed {resp.status_code}: {image_url}")
+            except Exception as exc:
+                print(f"[OMMA] Image download error: {exc}")
+            return None
+
+        return None
 
 
 # ─── LinkedIn ─────────────────────────────────────────────────────────────────

@@ -62,31 +62,38 @@ export default function BrandDetailPage() {
 
   return (
     <DashboardLayout title={brand ? `${brand.name} — Configuration` : "Brand Configuration"}>
-      <div className="max-w-2xl space-y-5">
-        {/* Brand logo card */}
-        <BrandLogoCard
-          brandId={brandId}
-          logoUrl={brand?.logo_url ?? null}
-          brandName={brand?.name ?? ""}
-          onFlash={flash}
-          onSuccess={invalidateBrand}
-        />
+      <div className="space-y-6 max-w-7xl">
+        {/* Configuration cards layout grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="space-y-6">
+            {/* Brand logo card */}
+            <BrandLogoCard
+              brandId={brandId}
+              logoUrl={brand?.logo_url ?? null}
+              brandName={brand?.name ?? ""}
+              onFlash={flash}
+              onSuccess={invalidateBrand}
+            />
 
-        {/* Website auto-fetch card */}
-        <WebsiteFetchCard
-          brandId={brandId}
-          currentUrl={brand?.website_url ?? null}
-          onFlash={flash}
-          onSuccess={invalidateBrand}
-        />
+            {/* Website auto-fetch card */}
+            <WebsiteFetchCard
+              brandId={brandId}
+              currentUrl={brand?.website_url ?? null}
+              onFlash={flash}
+              onSuccess={invalidateBrand}
+            />
+          </div>
 
-        {/* Marketing strategy card */}
-        <MarketingStrategyCard
-          brandId={brandId}
-          currentStrategy={brand?.marketing_strategy ?? null}
-          onFlash={flash}
-          onSuccess={invalidateBrand}
-        />
+          <div className="flex flex-col">
+            {/* Marketing strategy card */}
+            <MarketingStrategyCard
+              brandId={brandId}
+              currentStrategy={brand?.marketing_strategy ?? null}
+              onFlash={flash}
+              onSuccess={invalidateBrand}
+            />
+          </div>
+        </div>
 
         {/* Tab bar */}
         <div className="flex gap-1 border-b border-gray-200 pb-0">
