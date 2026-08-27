@@ -432,8 +432,10 @@ async def publish_content(
             # Instagram and TikTok require a public URL — base64 data URIs can't be
             # fetched by either platform's PULL_FROM_URL mechanism.
             image_url = item.image_url
-            if platform in ("facebook", "instagram", "tiktok") and image_url and image_url.startswith("data:"):
+            if platform in ("facebook", "instagram", "tiktok") and image_url:
                 base = (settings.api_base_url or "").rstrip("/")
+                # Always use the current item's own image endpoint — avoids stale
+                # cross-item references and converts data URIs to a public URL.
                 image_url = f"{base}/api/content/{item_id}/image"
             post = PostPayload(
                 text=prepared.text_body,
