@@ -565,10 +565,13 @@ async def manual_connect(
     """Manually store a page access token without going through OAuth."""
     token = body.access_token
 
-    # Auto-extend short-lived Meta tokens to long-lived (60 days)
+    # For Meta platforms: extend User Token → long-lived User Token → Page Token (never-expiring)
+    # The short-lived Page Token from Graph API Explorer expires in 1-2 hours.
+    # A Page Token derived from a long-lived User Token never expires.
     if body.platform in ("facebook", "instagram") and settings.meta_app_id and settings.meta_app_secret:
         try:
             async with httpx.AsyncClient(timeout=15) as http:
+                # Step 1: extend to long-lived token (works on User Tokens; Page Tokens fail silently)
                 r = await http.get(
                     "https://graph.facebook.com/v18.0/oauth/access_token",
                     params={
@@ -583,6 +586,23 @@ async def manual_connect(
                     if long_lived:
                         token = long_lived
                         print(f"[OMMA] {body.platform} token extended to long-lived successfully")
+
+                        # Step 2: use the long-lived User Token to get a never-expiring Page Token
+                        # This works even when me/accounts returns empty (Business Manager pages)
+                        page_id = body.page_id
+                        page_r = await http.get(
+                            f"https://graph.facebook.com/v18.0/{page_id}",
+                            params={"fields": "access_token", "access_token": long_lived},
+                        )
+                        if page_r.is_success:
+                            page_token = page_r.json().get("access_token")
+                            if page_token:
+                                token = page_token
+                                print(f"[OMMA] {body.platform} got never-expiring page token for {page_id}")
+                            else:
+                                print(f"[OMMA] Page token not returned — storing long-lived user token")
+                        else:
+                            print(f"[OMMA] Page token fetch failed: {page_r.text[:200]}")
                 else:
                     print(f"[OMMA] Token extension failed (using original): {r.text[:200]}")
         except Exception as e:
