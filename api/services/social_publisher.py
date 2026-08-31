@@ -60,7 +60,13 @@ class MetaPublisher:
             )
             if not r.is_success:
                 print(f"[OMMA] Instagram API error {r.status_code}: {r.text}")
-            r.raise_for_status()
+                detail = r.text
+                try:
+                    err = r.json().get("error") or {}
+                    detail = err.get("error_user_msg") or err.get("message") or detail
+                except Exception:
+                    pass
+                raise ValueError(f"Instagram media create failed ({r.status_code}): {detail}")
             creation_id = r.json()["id"]
 
             # Wait for Instagram to finish processing the image before publishing

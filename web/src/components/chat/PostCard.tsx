@@ -6,7 +6,7 @@ import { platformLabel } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 import {
   Copy, CheckCircle, XCircle, RefreshCw, Rocket,
-  Hash, ImageIcon, Bot, Check, Loader2, Sparkles, Pencil, X, Upload,
+  Hash, ImageIcon, Bot, Check, Loader2, Sparkles, Pencil, X, Upload, AlertTriangle,
 } from "lucide-react";
 import type { ApprovalQueueItem, ApprovalStatus } from "@/types";
 
@@ -67,6 +67,7 @@ export function PostCard({ item, onAction, onItemUpdate, onRevise }: PostCardPro
   const [imageStage, setImageStage] = useState<string | null>(null);
   const [uploadLoading, setUploadLoading] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
+  const [uploadWarning, setUploadWarning] = useState<string | null>(null);
   const [editingPrompt, setEditingPrompt] = useState(false);
   const [promptDraft, setPromptDraft] = useState(ci.image_prompt ?? "");
 
@@ -144,6 +145,7 @@ export function PostCard({ item, onAction, onItemUpdate, onRevise }: PostCardPro
     setEditingPrompt(false);
     setImageLoading(true);
     setImageError(null);
+    setUploadWarning(null);
     setImageStage("Preparing prompt…");
     const stageTimer = window.setTimeout(() => setImageStage("Generating image…"), 2500);
     const stageTimer2 = window.setTimeout(() => setImageStage("Almost done — applying brand finish…"), 12000);
@@ -173,10 +175,12 @@ export function PostCard({ item, onAction, onItemUpdate, onRevise }: PostCardPro
     if (!file) return;
     setUploadLoading(true);
     setImageError(null);
+    setUploadWarning(null);
     try {
       const res = await contentApi.uploadImage(ci.id, file);
       const nextUrl = normalizeContentImageUrl(ci.id, res.image_url) ?? res.image_url;
       setImageUrl(nextUrl);
+      setUploadWarning(res.warning ?? null);
       notifyUpdate({ image_url: nextUrl });
     } catch (e: unknown) {
       setImageError(e instanceof Error ? e.message : "Upload failed");
@@ -313,6 +317,12 @@ export function PostCard({ item, onAction, onItemUpdate, onRevise }: PostCardPro
                   <p className="text-xs text-violet-600 flex items-center gap-1.5">
                     <Loader2 className="h-3 w-3 animate-spin" /> {imageStage}
                   </p>
+                )}
+                {uploadWarning && (
+                  <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                    <AlertTriangle className="h-3.5 w-3.5 text-amber-600 mt-0.5 shrink-0" />
+                    <p className="text-xs text-amber-800 leading-relaxed">{uploadWarning}</p>
+                  </div>
                 )}
                 {imageError && (
                   <div className="flex items-start justify-between gap-2">
