@@ -148,7 +148,7 @@ function buildAssistantHistoryContent(items: ApprovalQueueItem[], platform: stri
 
 export function ChatWindow() {
   const qc = useQueryClient();
-  const { data: brands = [] } = useQuery({ queryKey: ["brands"], queryFn: brandsApi.list });
+  const { data: brands = [], isLoading } = useQuery({ queryKey: ["brands"], queryFn: brandsApi.list });
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversationHistory, setConversationHistory] = useState<ConversationTurn[]>([]);
   const [input, setInput] = useState("");
@@ -439,12 +439,18 @@ export function ChatWindow() {
               <select
                 value={brandId}
                 onChange={(e) => setBrandId(e.target.value)}
-                className="appearance-none pl-3 pr-8 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                disabled={isLoading}
+                className="appearance-none pl-3 pr-8 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer disabled:opacity-50"
               >
-                {brandOptions.length === 0 && <option value="">No brands — create one first</option>}
-                {brandOptions.map((b) => (
-                  <option key={b.id} value={b.id}>{b.name}</option>
-                ))}
+                {isLoading ? (
+                  <option value="">Loading brands...</option>
+                ) : brandOptions.length === 0 ? (
+                  <option value="">No brands — create one first</option>
+                ) : (
+                  brandOptions.map((b) => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))
+                )}
               </select>
               <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400 pointer-events-none" />
             </div>
@@ -452,7 +458,12 @@ export function ChatWindow() {
         </div>
 
         <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
-          {messages.length === 0 ? (
+          {isLoading ? (
+            <div className="flex flex-col items-center justify-center h-full pb-12 text-center px-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+              <p className="text-gray-500 text-sm mt-3">Loading brands...</p>
+            </div>
+          ) : messages.length === 0 ? (
             <WelcomeScreen brandCount={brands.length} />
           ) : (
             messages.map((msg) => {
