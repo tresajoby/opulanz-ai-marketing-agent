@@ -7,6 +7,7 @@ import { useAuth } from "@/context/AuthContext";
 import {
   Copy, CheckCircle, XCircle, RefreshCw, Rocket,
   Hash, ImageIcon, Bot, Check, Loader2, Sparkles, Pencil, X, Upload, AlertTriangle,
+  Eye, EyeOff, Heart, MessageSquare, Share2, ThumbsUp, MoreHorizontal,
 } from "lucide-react";
 import type { ApprovalQueueItem, ApprovalStatus } from "@/types";
 
@@ -70,6 +71,7 @@ export function PostCard({ item, onAction, onItemUpdate, onRevise }: PostCardPro
   const [uploadWarning, setUploadWarning] = useState<string | null>(null);
   const [editingPrompt, setEditingPrompt] = useState(false);
   const [promptDraft, setPromptDraft] = useState(ci.image_prompt ?? "");
+  const [showPreview, setShowPreview] = useState(false);
 
   // Keep local UI in sync when parent hydrates fresh server state (e.g. after tab nav)
   useEffect(() => {
@@ -392,6 +394,121 @@ export function PostCard({ item, onAction, onItemUpdate, onRevise }: PostCardPro
             )}
           </div>
         )}
+
+        {showPreview && (
+          <div className="mt-4 border-t border-gray-100 pt-4 bg-gray-50/50 p-4 rounded-xl">
+            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Simulated Live Feed Preview</p>
+            {ci.platform === "instagram" ? (
+              <div className="bg-white border border-gray-200 rounded-xl overflow-hidden max-w-sm mx-auto shadow-sm">
+                {/* IG Header */}
+                <div className="flex items-center justify-between p-3 border-b border-gray-50">
+                  <div className="flex items-center gap-2">
+                    <div className="h-8 w-8 rounded-full bg-gradient-to-tr from-yellow-500 via-red-500 to-purple-600 p-[1.5px]">
+                      <div className="h-full w-full rounded-full bg-white flex items-center justify-center text-[10px] font-bold text-gray-700">OP</div>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-gray-900">opulanz_marketing</p>
+                      <p className="text-[9px] text-gray-500">Sponsored</p>
+                    </div>
+                  </div>
+                  <MoreHorizontal className="h-4 w-4 text-gray-400" />
+                </div>
+                {/* IG Image */}
+                <div className="aspect-square bg-gray-100 flex items-center justify-center overflow-hidden">
+                  {imageUrl ? (
+                    <img src={imageUrl} alt="IG Preview" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="text-center p-6 text-gray-400">
+                      <ImageIcon className="h-8 w-8 mx-auto mb-2 opacity-55" />
+                      <p className="text-[10px]">No image generated yet</p>
+                    </div>
+                  )}
+                </div>
+                {/* IG Actions */}
+                <div className="p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <Heart className="h-5 w-5 text-gray-700 hover:text-red-500 cursor-pointer" />
+                      <MessageSquare className="h-5 w-5 text-gray-700" />
+                      <Share2 className="h-5 w-5 text-gray-700" />
+                    </div>
+                  </div>
+                  {/* IG Caption */}
+                  <div className="text-xs text-gray-800 space-y-1">
+                    <p>
+                      <span className="font-semibold mr-1.5 text-gray-900">opulanz_marketing</span>
+                      {ci.text_body}
+                    </p>
+                    {ci.hashtags && (
+                      <p className="text-indigo-600 font-medium">{ci.hashtags}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : ci.platform === "linkedin" ? (
+              <div className="bg-white border border-gray-200 rounded-xl p-4 max-w-md mx-auto shadow-sm space-y-3">
+                {/* LI Header */}
+                <div className="flex items-start justify-between">
+                  <div className="flex gap-2">
+                    <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center font-bold text-blue-700 text-sm">OP</div>
+                    <div>
+                      <div className="flex items-center gap-1">
+                        <p className="text-xs font-semibold text-gray-900">Opulanz Business Hub</p>
+                        <span className="text-[10px] text-gray-400 font-medium">• 1st</span>
+                      </div>
+                      <p className="text-[9px] text-gray-500">AI Marketing Director at Opulanz</p>
+                      <p className="text-[9px] text-gray-400">Just now • Edited • 🌐</p>
+                    </div>
+                  </div>
+                  <MoreHorizontal className="h-4 w-4 text-gray-400" />
+                </div>
+                {/* LI Body */}
+                <div className="text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
+                  {ci.text_body}
+                  {ci.hashtags && (
+                    <p className="mt-2 text-indigo-600 font-medium">{ci.hashtags}</p>
+                  )}
+                </div>
+                {/* LI Media */}
+                {imageUrl && (
+                  <div className="rounded-lg overflow-hidden border border-gray-200 max-h-72 bg-gray-50">
+                    <img src={imageUrl} alt="LinkedIn Preview" className="w-full h-full object-cover" />
+                  </div>
+                )}
+                {/* LI Actions */}
+                <div className="border-t border-gray-100 pt-2 flex items-center justify-around text-gray-500 text-[11px] font-medium">
+                  <button className="flex items-center gap-1.5 hover:bg-gray-50 p-1.5 rounded transition-colors">
+                    <ThumbsUp className="h-4 w-4" /> Like
+                  </button>
+                  <button className="flex items-center gap-1.5 hover:bg-gray-50 p-1.5 rounded transition-colors">
+                    <MessageSquare className="h-4 w-4" /> Comment
+                  </button>
+                  <button className="flex items-center gap-1.5 hover:bg-gray-50 p-1.5 rounded transition-colors">
+                    <Share2 className="h-4 w-4" /> Share
+                  </button>
+                </div>
+              </div>
+            ) : (
+              // Default generic social mock (for tiktok, facebook etc.)
+              <div className="bg-white border border-gray-200 rounded-xl p-4 max-w-sm mx-auto shadow-sm space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="h-8 w-8 rounded-full bg-indigo-100 flex items-center justify-center font-bold text-indigo-600 text-xs">OP</div>
+                  <div>
+                    <p className="text-xs font-semibold text-gray-900">opulanz_brand</p>
+                    <p className="text-[9px] text-gray-400 capitalize">{ci.platform} Post Preview</p>
+                  </div>
+                </div>
+                <div className="text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">{ci.text_body}</div>
+                {ci.hashtags && <p className="text-xs text-indigo-600 font-medium">{ci.hashtags}</p>}
+                {imageUrl && (
+                  <div className="rounded-lg overflow-hidden border border-gray-200">
+                    <img src={imageUrl} alt="Preview" className="w-full max-h-60 object-cover" />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Scores + copy */}
@@ -412,13 +529,25 @@ export function PostCard({ item, onAction, onItemUpdate, onRevise }: PostCardPro
             </div>
           )}
         </div>
-        <button
-          onClick={copyText}
-          className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800 transition-colors px-2 py-1 rounded hover:bg-gray-100"
-        >
-          {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-          {copied ? "Copied!" : "Copy"}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowPreview(!showPreview)}
+            className={`flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded transition-colors ${
+              showPreview ? "text-indigo-600 bg-indigo-50 border border-indigo-200" : "text-gray-500 hover:text-gray-800 hover:bg-gray-100"
+            }`}
+            title="Toggle Live Social Media Feed Preview"
+          >
+            {showPreview ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+            {showPreview ? "Hide Preview" : "Preview"}
+          </button>
+          <button
+            onClick={copyText}
+            className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800 transition-colors px-2 py-1 rounded hover:bg-gray-100"
+          >
+            {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+            {copied ? "Copied!" : "Copy"}
+          </button>
+        </div>
       </div>
 
       {/* Comment input for reject/revise/approve modes */}

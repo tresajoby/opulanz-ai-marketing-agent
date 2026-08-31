@@ -45,7 +45,14 @@ celery_app.conf.update(
 
 # ─── Publishing task ─────────────────────────────────────────────────────────
 
-@celery_app.task(name="api.tasks.celery_app.publish_content_task", bind=True, max_retries=3)
+@celery_app.task(
+    name="api.tasks.celery_app.publish_content_task",
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=600,
+    max_retries=5
+)
 def publish_content_task(self, content_item_id: int):
     """
     1. Load the approved ContentItem from DB.
@@ -53,7 +60,7 @@ def publish_content_task(self, content_item_id: int):
     3. Find the brand's connected SocialAccount for that platform.
     4. Call the platform publisher to post it.
     5. Save the resulting post ID and mark the item published.
-    Retries up to 3× with exponential backoff on any failure.
+    Retries up to 5× with exponential backoff on any failure.
     """
     import asyncio
     from datetime import datetime
@@ -104,6 +111,7 @@ def publish_content_task(self, content_item_id: int):
                     print(f"[OMMA] Published to {platform}, post_id={post_id}")
                 except Exception as exc:
                     print(f"[OMMA] Publish error ({platform}): {exc}")
+                    raise exc
             else:
                 print(f"[OMMA] No connected account for {platform} on brand {item.brand_id} — skipping live post")
 
@@ -115,10 +123,8 @@ def publish_content_task(self, content_item_id: int):
         await engine.dispose()
         return {"status": "published", "content_item_id": content_item_id, "post_id": post_id}
 
-    try:
-        return asyncio.run(_run())
-    except Exception as exc:
-        raise self.retry(exc=exc, countdown=2 ** self.request.retries * 60)
+    return asyncio.run(_run())
+
 
 
 # ─── Scheduled tasks ─────────────────────────────────────────────────────────

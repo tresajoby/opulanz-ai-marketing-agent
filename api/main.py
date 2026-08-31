@@ -53,3 +53,28 @@ async def health_check():
         "version": "0.1.0",
         "agent": "OMMA — Opulanz Marketing Manager Agent",
     }
+
+
+from fastapi import Request
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import SQLAlchemyError
+import logging
+
+logger = logging.getLogger("omma")
+
+@app.exception_handler(SQLAlchemyError)
+async def database_exception_handler(request: Request, exc: SQLAlchemyError):
+    logger.error(f"Database error on {request.method} {request.url.path}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Database service is temporarily unavailable. Please try again."},
+    )
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Global exception handled for {request.method} {request.url.path}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "An internal server error occurred. Please try again later."},
+    )
+
