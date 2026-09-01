@@ -10,7 +10,7 @@ import { Input, Textarea } from "@/components/ui/Input";
 import { Alert } from "@/components/ui/Alert";
 import { brandsApi } from "@/lib/api";
 import type { WebsiteFetchResult } from "@/types";
-import { BookOpen, Package, Users, ShieldAlert, Globe, Loader2, CheckCircle2, ChevronDown, ChevronUp, Link2, Link2Off, Target } from "lucide-react";
+import { BookOpen, Package, Users, ShieldAlert, Globe, Loader2, CheckCircle2, ChevronDown, ChevronUp, Link2, Link2Off, Target, AlertTriangle, RefreshCw } from "lucide-react";
 import { socialApi } from "@/lib/api";
 import type { SocialAccount } from "@/types";
 
@@ -223,7 +223,25 @@ function SocialAccountsTab({
     }
   }
 
+  async function handleVerify(acct: SocialAccount) {
+    setBusy(`verify-${acct.id}`);
+    try {
+      const res = await socialApi.verifyAccount(acct.id);
+      refetch();
+      if (res.is_valid) {
+        onFlash("success", `${acct.platform.toUpperCase()} connection is healthy!`);
+      } else {
+        onFlash("error", res.validation_error || "Verification failed — please reconnect.");
+      }
+    } catch (e: unknown) {
+      onFlash("error", e instanceof Error ? e.message : "Verification request failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const connectedByPlatform = Object.fromEntries(accounts.map((a) => [a.platform, a]));
+  const accountsWithErrors = accounts.filter((a) => a.validation_error);
 
   return (
     <Card>
@@ -238,6 +256,15 @@ function SocialAccountsTab({
         </p>
       </CardHeader>
       <CardBody>
+        {accountsWithErrors.length > 0 && (
+          <div className="mb-4 flex items-start gap-2.5 p-3 rounded-xl border border-amber-300 bg-amber-50 text-amber-900 text-xs">
+            <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <span className="font-semibold">Action Required: </span>
+              {accountsWithErrors.length} social account{accountsWithErrors.length > 1 ? "s have" : " has"} an expired or revoked authorization. Please reconnect to ensure posts publish without error.
+            </div>
+          </div>
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {SOCIAL_PLATFORMS.map((plat) => {
             const acct = connectedByPlatform[plat.key];
@@ -245,11 +272,17 @@ function SocialAccountsTab({
             const isGradient = plat.color.startsWith("from-");
             const isBusy = busy === `disconnect-${acct?.id}`;
 
+            const hasError = isConnected && !!acct.validation_error;
+
             return (
               <div
                 key={plat.key}
-                className={`rounded-xl border p-4 ${
-                  isConnected ? "border-emerald-200 bg-emerald-50" : "border-gray-200 bg-gray-50"
+                className={`rounded-xl border p-4 transition-all ${
+                  hasError
+                    ? "border-amber-300 bg-amber-50/50 shadow-sm"
+                    : isConnected
+                    ? "border-emerald-200 bg-emerald-50"
+                    : "border-gray-200 bg-gray-50"
                 }`}
               >
                 {/* Main row */}
@@ -264,21 +297,46 @@ function SocialAccountsTab({
 
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900">{plat.label}</p>
-                    {isConnected
-                      ? <p className="text-xs text-emerald-700 truncate">{acct.account_name}</p>
-                      : <p className="text-xs text-gray-400">Not connected</p>
-                    }
+                    {isConnected ? (
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <p className={`text-xs truncate font-medium ${hasError ? "text-amber-800" : "text-emerald-700"}`}>
+                          {acct.account_name}
+                        </p>
+                        {hasError && (
+                          <span className="inline-flex items-center px-1.5 py-0.2 text-[10px] font-semibold bg-amber-200/80 text-amber-900 rounded">
+                            Action Needed
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-gray-400">Not connected</p>
+                    )}
                   </div>
 
                   {isConnected ? (
-                    <button
-                      onClick={() => handleDisconnect(acct)}
-                      disabled={isBusy}
-                      className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-50 disabled:opacity-50 transition-colors shrink-0"
-                    >
-                      {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Link2Off className="h-3.5 w-3.5" />}
-                      Disconnect
-                    </button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={() => handleVerify(acct)}
+                        disabled={busy === `verify-${acct.id}`}
+                        title="Test token and live permissions"
+                        className="flex items-center gap-1 text-xs text-gray-600 hover:text-gray-900 px-2 py-1 rounded hover:bg-white/80 transition-colors font-medium border border-gray-200"
+                      >
+                        {busy === `verify-${acct.id}` ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-3 w-3" />
+                        )}
+                        Test
+                      </button>
+                      <button
+                        onClick={() => handleDisconnect(acct)}
+                        disabled={isBusy}
+                        className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-50 disabled:opacity-50 transition-colors"
+                      >
+                        {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Link2Off className="h-3.5 w-3.5" />}
+                        Disconnect
+                      </button>
+                    </div>
                   ) : (
                     <div className="flex flex-col items-end gap-1 shrink-0">
                       <button
@@ -297,6 +355,35 @@ function SocialAccountsTab({
                     </div>
                   )}
                 </div>
+
+                {/* Revocation / error warning banner */}
+                {hasError && (
+                  <div className="mt-3 pt-3 border-t border-amber-200">
+                    <div className="flex items-start gap-2 text-xs text-amber-950 bg-amber-100/80 border border-amber-300 rounded-lg p-2.5">
+                      <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-amber-900">Authorization Revoked or Expired</p>
+                        <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">{acct.validation_error}</p>
+                        <div className="flex items-center gap-2 mt-2">
+                          <button
+                            onClick={() => handleConnect(plat.key)}
+                            className="text-[11px] font-medium bg-amber-700 hover:bg-amber-800 text-white px-2.5 py-1 rounded transition-colors"
+                          >
+                            Reconnect OAuth
+                          </button>
+                          <button
+                            onClick={() => handleVerify(acct)}
+                            disabled={busy === `verify-${acct.id}`}
+                            className="text-[11px] text-amber-900 hover:underline flex items-center gap-1 font-medium"
+                          >
+                            {busy === `verify-${acct.id}` ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                            Re-check status
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Paste token form */}
                 {pasteMode === plat.key && (

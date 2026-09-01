@@ -15,7 +15,7 @@ import hmac
 import json
 import time
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -247,6 +247,7 @@ async def _upsert_account(
     access_token: str,
     refresh_token: str | None = None,
     scopes: str | None = None,
+    token_expires_at: datetime | None = None,
 ) -> SocialAccount:
     result = await db.execute(
         select(SocialAccount).where(
@@ -261,9 +262,13 @@ async def _upsert_account(
         acct.account_id = account_id
         acct.account_name = account_name
         acct.access_token = encrypt(access_token)
-        acct.refresh_token = encrypt(refresh_token) if refresh_token else None
+        if refresh_token:
+            acct.refresh_token = encrypt(refresh_token)
+        if token_expires_at is not None:
+            acct.token_expires_at = token_expires_at
         acct.scopes = scopes
         acct.is_active = True
+        acct.validation_error = None
         acct.updated_at = now
     else:
         acct = SocialAccount(
@@ -273,8 +278,10 @@ async def _upsert_account(
             account_name=account_name,
             access_token=encrypt(access_token),
             refresh_token=encrypt(refresh_token) if refresh_token else None,
+            token_expires_at=token_expires_at,
             scopes=scopes,
             is_active=True,
+            validation_error=None,
             connected_at=now,
             updated_at=now,
         )
@@ -382,8 +389,11 @@ async def _handle_meta_callback(
                     "No Instagram Business account found linked to your Facebook pages. "
                     "Convert your Instagram to a Business account and link it to a Facebook Page."
                 )
+            meta_expires_in = token_data.get("expires_in")
+            meta_expires_at = datetime.utcnow() + timedelta(seconds=int(meta_expires_in)) if meta_expires_in else datetime.utcnow() + timedelta(days=60)
             return await _upsert_account(
-                db, brand_id, "instagram", ig_id, ig_name or "Instagram", page_token
+                db, brand_id, "instagram", ig_id, ig_name or "Instagram", page_token,
+                token_expires_at=meta_expires_at,
             )
         else:
             # Facebook: get the first page's page-level token
@@ -399,9 +409,12 @@ async def _handle_meta_callback(
                     "Create a Facebook Page to connect it."
                 )
             page = pages[0]
+            meta_expires_in = token_data.get("expires_in")
+            meta_expires_at = datetime.utcnow() + timedelta(seconds=int(meta_expires_in)) if meta_expires_in else datetime.utcnow() + timedelta(days=60)
             return await _upsert_account(
                 db, brand_id, "facebook",
                 page["id"], page["name"], page["access_token"],
+                token_expires_at=meta_expires_at,
             )
 
 
@@ -468,8 +481,13 @@ async def _handle_linkedin_callback(
             except Exception:
                 pass
 
+    expires_in = token_data.get("expires_in")
+    token_expires_at = datetime.utcnow() + timedelta(seconds=int(expires_in)) if expires_in else None
+    refresh_token = token_data.get("refresh_token")
+
     return await _upsert_account(
-        db, brand_id, "linkedin", person_id or f"li_{brand_id}", name, access_token, scopes=scopes
+        db, brand_id, "linkedin", person_id or f"li_{brand_id}", name, access_token,
+        refresh_token=refresh_token, scopes=scopes, token_expires_at=token_expires_at,
     )
 
 
@@ -509,9 +527,13 @@ async def _handle_tiktok_callback(
         user_data = info_r.json().get("data", {}).get("user", {})
 
     name = user_data.get("display_name") or "TikTok User"
+    expires_in = token_data.get("expires_in")
+    token_expires_at = datetime.utcnow() + timedelta(seconds=int(expires_in)) if expires_in else None
+    refresh_token = token_data.get("refresh_token")
+
     return await _upsert_account(
         db, brand_id, "tiktok", open_id or "unknown", name,
-        access_token, scopes=scopes,
+        access_token, refresh_token=refresh_token, scopes=scopes, token_expires_at=token_expires_at,
     )
 
 
@@ -526,6 +548,7 @@ class SocialAccountOut(BaseModel):
     avatar_url: str | None
     scopes: str | None
     is_active: bool
+    validation_error: str | None = None
     connected_at: datetime
     token_expires_at: datetime | None
 
@@ -622,6 +645,8 @@ async def manual_connect(
     if existing:
         existing.access_token = encrypted
         existing.is_active = True
+        existing.validation_error = None
+        existing.token_expires_at = datetime.utcnow() + timedelta(days=60)
         existing.updated_at = datetime.utcnow()
     else:
         db.add(SocialAccount(
@@ -630,7 +655,9 @@ async def manual_connect(
             account_id=body.page_id,
             account_name=body.page_name,
             access_token=encrypted,
+            token_expires_at=datetime.utcnow() + timedelta(days=60),
             is_active=True,
+            validation_error=None,
             connected_at=datetime.utcnow(),
         ))
 
@@ -655,3 +682,29 @@ async def disconnect_account(
     acct.updated_at = datetime.utcnow()
     await db.commit()
     return {"message": f"Disconnected {acct.account_name} ({acct.platform})."}
+
+
+# ─── Account health verification ───────────────────────────────────────────────
+
+@router.post("/accounts/{account_id}/verify")
+async def verify_account_health(
+    account_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Verify live credentials and permissions for a connected account."""
+    from ..services.token_manager import verify_and_validate_account
+
+    result = await db.execute(select(SocialAccount).where(SocialAccount.id == account_id))
+    acct = result.scalar_one_or_none()
+    if not acct:
+        raise HTTPException(status_code=404, detail="Social account not found.")
+
+    is_valid, err_msg = await verify_and_validate_account(acct, db)
+    return {
+        "account_id": acct.id,
+        "platform": acct.platform,
+        "account_name": acct.account_name,
+        "is_valid": is_valid,
+        "validation_error": acct.validation_error,
+    }

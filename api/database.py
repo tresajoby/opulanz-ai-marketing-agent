@@ -61,8 +61,12 @@ async def init_db():
                 token_expires_at TIMESTAMP,
                 scopes VARCHAR(500),
                 is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                validation_error TEXT,
                 connected_at TIMESTAMP NOT NULL,
                 updated_at TIMESTAMP NOT NULL,
                 CONSTRAINT uq_social_brand_platform_account UNIQUE (brand_id, platform, account_id)
             )
         """))
+        await conn.execute(text(
+            "ALTER TABLE social_accounts ADD COLUMN IF NOT EXISTS validation_error TEXT"
+        ))

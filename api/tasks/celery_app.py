@@ -39,6 +39,11 @@ celery_app.conf.update(
             "task": "api.tasks.celery_app.fetch_post_metrics_task",
             "schedule": crontab(hour=6, minute=0),  # 6 AM UTC daily
         },
+        # Proactively check authorization health for all connected social accounts every 12 hours
+        "verify-social-tokens": {
+            "task": "api.tasks.celery_app.verify_all_tokens_task",
+            "schedule": crontab(hour="*/12", minute=30),
+        },
     },
 )
 
@@ -107,7 +112,7 @@ def publish_content_task(self, content_item_id: int):
                         hashtags=prepared.hashtags,
                         image_url=item.image_url,
                     )
-                    post_id = await publish_to_platform(account, post)
+                    post_id = await publish_to_platform(account, post, db=db)
                     print(f"[OMMA] Published to {platform}, post_id={post_id}")
                 except Exception as exc:
                     print(f"[OMMA] Publish error ({platform}): {exc}")
@@ -166,3 +171,40 @@ def fetch_post_metrics_task():
     """
     print("[OMMA] Fetching post metrics... (add platform API calls here)")
     # TODO: Meta Graph API insights, TikTok analytics API
+
+
+@celery_app.task(name="api.tasks.celery_app.verify_all_tokens_task")
+def verify_all_tokens_task():
+    """
+    Check authorization & token validity for all connected social accounts.
+    Proactively detects revoked permissions/expired tokens and flags them for the UI.
+    """
+    import asyncio
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+    from sqlalchemy import select
+    from ..models.social import SocialAccount
+    from ..services.token_manager import verify_and_validate_account
+
+    async def _run():
+        engine = create_async_engine(settings.database_url)
+        SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+        async with SessionLocal() as db:
+            accounts = (await db.execute(
+                select(SocialAccount).where(SocialAccount.is_active == True)
+            )).scalars().all()
+            print(f"[OMMA] Running health verification for {len(accounts)} active social accounts...")
+
+            for acct in accounts:
+                try:
+                    is_valid, err = await verify_and_validate_account(acct, db)
+                    if not is_valid:
+                        print(f"[OMMA] Token validation warning for {acct.platform} ({acct.account_name}): {err}")
+                    else:
+                        print(f"[OMMA] {acct.platform} account '{acct.account_name}' is healthy.")
+                except Exception as exc:
+                    print(f"[OMMA] Error verifying {acct.platform} account {acct.id}: {exc}")
+
+        await engine.dispose()
+
+    asyncio.run(_run())

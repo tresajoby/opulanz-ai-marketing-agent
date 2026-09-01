@@ -13,6 +13,8 @@ from dataclasses import dataclass
 
 import httpx
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from ..models.social import SocialAccount
 from ..services.token_service import decrypt
 
@@ -377,12 +379,45 @@ _linkedin = LinkedInPublisher()
 _tiktok = TikTokPublisher()
 
 
-async def publish_to_platform(account: SocialAccount, post: PostPayload) -> str:
-    """Route to the correct publisher based on platform."""
-    if account.platform in ("facebook", "instagram"):
-        return await _meta.publish(account, post)
-    if account.platform == "linkedin":
-        return await _linkedin.publish(account, post)
-    if account.platform == "tiktok":
-        return await _tiktok.publish(account, post)
-    raise ValueError(f"No publisher registered for platform: {account.platform}")
+async def publish_to_platform(
+    account: SocialAccount, post: PostPayload, db: AsyncSession | None = None
+) -> str:
+    """Route to the correct publisher based on platform, ensuring token is refreshed & valid."""
+    if db is not None:
+        from .token_manager import refresh_social_account_token
+        try:
+            await refresh_social_account_token(account, db)
+        except Exception as e:
+            print(f"[OMMA] Pre-publish token refresh failed (attempting with current token): {e}")
+
+    try:
+        if account.platform in ("facebook", "instagram"):
+            post_id = await _meta.publish(account, post)
+        elif account.platform == "linkedin":
+            post_id = await _linkedin.publish(account, post)
+        elif account.platform == "tiktok":
+            post_id = await _tiktok.publish(account, post)
+        else:
+            raise ValueError(f"No publisher registered for platform: {account.platform}")
+
+        # Clear past validation error if publish succeeded
+        if db is not None and account.validation_error:
+            account.validation_error = None
+            await db.commit()
+
+        return post_id
+    except Exception as exc:
+        err_str = str(exc)
+        is_auth_error = any(
+            kw in err_str.lower()
+            for kw in (
+                "token", "oauth", "unauthorized", "expired", "permission",
+                "revoked", "190", "401", "403", "session has expired"
+            )
+        )
+        if db is not None and is_auth_error:
+            account.validation_error = (
+                f"{account.platform.title()} authorization revoked or expired: {err_str[:250]}"
+            )
+            await db.commit()
+        raise exc

@@ -255,6 +255,11 @@ export const socialApi = {
       method: "POST",
       body: JSON.stringify({ platform, page_id: pageId, page_name: pageName, access_token: accessToken }),
     }),
+  verifyAccount: (accountId: number) =>
+    request<{ account_id: number; platform: string; account_name: string; is_valid: boolean; validation_error: string | null }>(
+      `/api/social/accounts/${accountId}/verify`,
+      { method: "POST" }
+    ),
 };
 
 // ─── Analytics ────────────────────────────────────────────────────────────────

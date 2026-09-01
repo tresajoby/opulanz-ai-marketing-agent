@@ -143,6 +143,7 @@ export interface SocialAccount {
   avatar_url: string | null;
   scopes: string | null;
   is_active: boolean;
+  validation_error?: string | null;
   connected_at: string;
   token_expires_at: string | null;
 }
