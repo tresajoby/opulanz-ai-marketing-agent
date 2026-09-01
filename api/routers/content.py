@@ -41,6 +41,21 @@ APPROVAL_DEADLINE_HOURS = 24
 _MAX_IMAGE_PROMPT_CHARS = 3000
 
 
+def _sanitize_publish_error(message: str) -> str:
+    """Never return access tokens or full Graph URLs to the client."""
+    import re
+    msg = re.sub(r"access_token=[^&\s'\"]+", "access_token=[redacted]", message, flags=re.I)
+    msg = re.sub(r"https?://graph\.facebook\.com/[^\s'\"]+", "Facebook API", msg, flags=re.I)
+    msg = re.sub(
+        r"Client error '\d+ [^']+' for url '[^']*'\s*",
+        "",
+        msg,
+        flags=re.I,
+    )
+    msg = re.sub(r"\s*For more information check:.*$", "", msg, flags=re.I | re.S)
+    return msg.strip() or "Publishing failed. Please try again."
+
+
 def _api_public_base(request: Request | None = None) -> str:
     """Prefer configured API base URL; fall back to the incoming request host."""
     if settings.api_base_url:
@@ -621,7 +636,7 @@ async def publish_content(
             post_id = await publish_to_platform(account, post)
             print(f"[OMMA] Published to {platform}, post_id={post_id}")
         except Exception as exc:
-            publish_error = str(exc)
+            publish_error = _sanitize_publish_error(str(exc))
             print(f"[OMMA] Publish error ({platform}): {exc}")
     else:
         publish_error = f"No connected {platform} account found for this brand."

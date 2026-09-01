@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import { contentApi, normalizeContentImageUrl } from "@/lib/api";
 import { platformLabel } from "@/lib/utils";
+import { formatPublishError, getPlatformImageGuide } from "@/lib/platformImage";
 import { useAuth } from "@/context/AuthContext";
+import { ImageCropModal } from "@/components/chat/ImageCropModal";
 import {
   Copy, CheckCircle, XCircle, RefreshCw, Rocket,
   Hash, ImageIcon, Bot, Check, Loader2, Sparkles, Pencil, X, Upload, AlertTriangle,
@@ -72,6 +74,9 @@ export function PostCard({ item, onAction, onItemUpdate, onRevise }: PostCardPro
   const [editingPrompt, setEditingPrompt] = useState(false);
   const [promptDraft, setPromptDraft] = useState(ci.image_prompt ?? "");
   const [showPreview, setShowPreview] = useState(false);
+  const [cropFile, setCropFile] = useState<File | null>(null);
+
+  const imageGuide = getPlatformImageGuide(ci.platform);
 
   // Keep local UI in sync when parent hydrates fresh server state (e.g. after tab nav)
   useEffect(() => {
@@ -174,21 +179,32 @@ export function PostCard({ item, onAction, onItemUpdate, onRevise }: PostCardPro
 
   async function handleUploadImage(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
+    e.target.value = "";
     if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setImageError("Please choose an image file (JPG, PNG, WebP, etc.).");
+      return;
+    }
+    setImageError(null);
+    setUploadWarning(null);
+    setCropFile(file);
+  }
+
+  async function handleCroppedUpload(cropped: File) {
     setUploadLoading(true);
     setImageError(null);
     setUploadWarning(null);
     try {
-      const res = await contentApi.uploadImage(ci.id, file);
+      const res = await contentApi.uploadImage(ci.id, cropped);
       const nextUrl = normalizeContentImageUrl(ci.id, res.image_url) ?? res.image_url;
       setImageUrl(nextUrl);
       setUploadWarning(res.warning ?? null);
+      setCropFile(null);
       notifyUpdate({ image_url: nextUrl });
     } catch (e: unknown) {
       setImageError(e instanceof Error ? e.message : "Upload failed");
     } finally {
       setUploadLoading(false);
-      e.target.value = "";
     }
   }
 
@@ -197,13 +213,13 @@ export function PostCard({ item, onAction, onItemUpdate, onRevise }: PostCardPro
     try {
       const result = await contentApi.publish(ci.id);
       if (result?.warning) {
-        setError(`Publishing failed: ${result.warning}`);
+        setError(formatPublishError(result.warning));
       } else {
         setPublished(true);
         notifyUpdate({ published: true, status: "approved" });
       }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed");
+      setError(formatPublishError(e instanceof Error ? e.message : "Failed"));
     } finally { setLoading(false); }
   }
 
@@ -287,7 +303,7 @@ export function PostCard({ item, onAction, onItemUpdate, onRevise }: PostCardPro
                     setImageUrl(null);
                   }}
                 />
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {(ci.image_prompt || promptDraft) && (
                     <button
                       onClick={handleGenerateImage}
@@ -314,6 +330,7 @@ export function PostCard({ item, onAction, onItemUpdate, onRevise }: PostCardPro
                       disabled={uploadLoading || imageLoading}
                     />
                   </label>
+                  <span className="text-[10px] text-gray-500">{imageGuide.guide}</span>
                 </div>
                 {imageLoading && imageStage && (
                   <p className="text-xs text-violet-600 flex items-center gap-1.5">
@@ -341,7 +358,7 @@ export function PostCard({ item, onAction, onItemUpdate, onRevise }: PostCardPro
               </div>
             ) : (
               <div className="space-y-2">
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {(ci.image_prompt || promptDraft) && (
                     <button
                       onClick={handleGenerateImage}
@@ -368,6 +385,7 @@ export function PostCard({ item, onAction, onItemUpdate, onRevise }: PostCardPro
                       disabled={uploadLoading || imageLoading}
                     />
                   </label>
+                  <span className="text-[10px] text-gray-500">{imageGuide.guide}</span>
                 </div>
                 {imageLoading && (
                   <div className="rounded-lg border border-dashed border-violet-200 bg-violet-50/60 px-3 py-6 text-center">
@@ -649,6 +667,17 @@ export function PostCard({ item, onAction, onItemUpdate, onRevise }: PostCardPro
             <Rocket className="h-3.5 w-3.5" /> Dispatched to publishing queue.
           </p>
         </div>
+      )}
+
+      {cropFile && (
+        <ImageCropModal
+          file={cropFile}
+          platform={ci.platform}
+          open={Boolean(cropFile)}
+          busy={uploadLoading}
+          onCancel={() => { if (!uploadLoading) setCropFile(null); }}
+          onConfirm={handleCroppedUpload}
+        />
       )}
     </div>
   );

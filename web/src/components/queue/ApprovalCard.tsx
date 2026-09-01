@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/Input";
 import { Alert } from "@/components/ui/Alert";
 import { contentApi } from "@/lib/api";
 import { platformLabel, platformColor, statusColor, formatDate, scoreBar } from "@/lib/utils";
+import { formatPublishError } from "@/lib/platformImage";
 import { useAuth } from "@/context/AuthContext";
 import {
   CheckCircle,
@@ -75,12 +76,12 @@ export function ApprovalCard({ item, onAction }: ApprovalCardProps) {
     try {
       const result = await contentApi.publish(ci.id);
       if (result?.warning) {
-        setError(`Publishing failed: ${result.warning}`);
+        setError(formatPublishError(result.warning));
       } else {
         setPublished(true); onAction();
       }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed");
+      setError(formatPublishError(e instanceof Error ? e.message : "Failed"));
     } finally { setLoading(false); }
   }
 

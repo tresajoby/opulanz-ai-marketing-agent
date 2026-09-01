@@ -33,6 +33,50 @@ class PostPayload:
 
 # ─── Meta (Facebook + Instagram) ─────────────────────────────────────────────
 
+def _friendly_meta_error(response: httpx.Response, platform: str) -> str:
+    """Turn Graph API / httpx failures into short user-facing messages (no tokens/URLs)."""
+    err: dict = {}
+    try:
+        err = (response.json() or {}).get("error") or {}
+    except Exception:
+        err = {}
+
+    user_msg = (err.get("error_user_msg") or err.get("error_user_title") or "").strip()
+    api_msg = (err.get("message") or "").strip()
+    code = err.get("code")
+    subcode = err.get("error_subcode")
+    combined = f"{api_msg} {user_msg}".lower()
+
+    if subcode in (2207009, 36003) or "aspect ratio" in combined:
+        return (
+            "Image aspect ratio is not supported. "
+            "Use a square or portrait crop between 4:5 and 1.91:1 (Instagram: ~1080×1080)."
+        )
+    if subcode in (2207005, 36001) or ("format" in combined and "not supported" in combined):
+        return "Image format is not supported. Please upload a JPEG or PNG and try again."
+    if (
+        code == 9004
+        or subcode in (2207052, 2207001)
+        or "could not be fetched" in combined
+        or "media download" in combined
+        or "download has failed" in combined
+    ):
+        return (
+            "The platform could not download the image. "
+            "Re-upload or regenerate the image, then publish again."
+        )
+    if "access token" in combined or code in (190, 102):
+        return f"{platform.capitalize()} access token is invalid or expired. Reconnect the account."
+    if "permission" in combined or code in (10, 200):
+        return f"Missing permission to publish to {platform}. Reconnect the account with publishing access."
+
+    if user_msg:
+        return user_msg
+    if api_msg and "http" not in api_msg.lower() and "access_token" not in api_msg.lower():
+        return api_msg
+    return f"{platform.capitalize()} rejected the post. Please try again or re-upload the image."
+
+
 class MetaPublisher:
     BASE = "https://graph.facebook.com/v18.0"
 
@@ -60,13 +104,7 @@ class MetaPublisher:
             )
             if not r.is_success:
                 print(f"[OMMA] Instagram API error {r.status_code}: {r.text}")
-                detail = r.text
-                try:
-                    err = r.json().get("error") or {}
-                    detail = err.get("error_user_msg") or err.get("message") or detail
-                except Exception:
-                    pass
-                raise ValueError(f"Instagram media create failed ({r.status_code}): {detail}")
+                raise ValueError(_friendly_meta_error(r, "instagram"))
             creation_id = r.json()["id"]
 
             # Wait for Instagram to finish processing the image before publishing
@@ -82,7 +120,10 @@ class MetaPublisher:
                     if status == "FINISHED":
                         break
                     if status == "ERROR":
-                        raise ValueError("Instagram media processing failed.")
+                        raise ValueError(
+                            "Instagram could not process the image. "
+                            "Try a JPEG around 1080×1080 and publish again."
+                        )
                 else:
                     break
 
@@ -93,7 +134,7 @@ class MetaPublisher:
             )
             if not r2.is_success:
                 print(f"[OMMA] Instagram publish error {r2.status_code}: {r2.text}")
-            r2.raise_for_status()
+                raise ValueError(_friendly_meta_error(r2, "instagram"))
             return r2.json().get("id", creation_id)
 
     async def _publish_facebook(self, page_id: str, token: str, post: PostPayload) -> str:
@@ -113,7 +154,7 @@ class MetaPublisher:
                     r = await http.post(
                         f"{self.BASE}/{page_id}/photos",
                         data={"message": post.caption, "access_token": token},
-                        files={"source": ("image.png", image_bytes, "image/png")},
+                        files={"source": ("image.jpg", image_bytes, "image/jpeg")},
                     )
                 else:
                     # Fallback: couldn't download — try text-only post
@@ -129,7 +170,7 @@ class MetaPublisher:
                 )
             if not r.is_success:
                 print(f"[OMMA] Facebook API error {r.status_code}: {r.text}")
-            r.raise_for_status()
+                raise ValueError(_friendly_meta_error(r, "facebook"))
             data = r.json()
             return data.get("post_id") or data.get("id", "")
 
