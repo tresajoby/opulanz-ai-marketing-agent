@@ -209,7 +209,7 @@ export const contentApi = {
       // Claude expansion + image model + compositing regularly exceeds 60s
       180_000,
     ),
-  uploadImage: async (id: number, file: File): Promise<ContentItem> => {
+  uploadImage: async (id: number, file: File): Promise<ContentItem & { warning?: string | null }> => {
     const token = getToken();
     const form = new FormData();
     form.append("file", file);

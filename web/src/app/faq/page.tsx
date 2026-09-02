@@ -30,7 +30,14 @@ const FAQ_DATA: FAQItem[] = [
   {
     category: "integrations",
     question: "Why am I seeing an error when uploading custom images?",
-    answer: "Uploaded images must be standard image file types (PNG, JPG, JPEG, WebP, etc.) and under 8 MB in size. Base64 data URLs are compressed and safely stored to ensure maximum compatibility across all integrated publishing platforms.",
+    answer:
+      "Uploaded images must be standard types (PNG, JPG, JPEG, WebP) and under 8 MB. After you pick a file, OMMA opens a crop preview so you can frame the image for the target platform before upload.\n\nRecommended sizes:\n• Instagram: 1080×1080 (square). Allowed aspect range is 4:5 to 1.91:1.\n• TikTok: 1080×1920 (9:16 vertical).\n• Facebook / LinkedIn: about 1200×630 (landscape ~1.91:1).\n\nUltra-wide or unusual aspect ratios can be rejected by Instagram — use the crop tool (or re-upload a better-fitting image) if you see a size warning.",
+  },
+  {
+    category: "integrations",
+    question: "What image size should I use for each platform?",
+    answer:
+      "Use the size hint next to Upload Custom Image on each post card. Defaults: Instagram 1080×1080, TikTok 1080×1920, Facebook/LinkedIn ~1200×630. AI-generated images already match these ratios; custom uploads should be cropped to match before publishing.",
   },
   {
     category: "generation",

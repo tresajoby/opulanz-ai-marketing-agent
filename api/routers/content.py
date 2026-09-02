@@ -41,6 +41,21 @@ APPROVAL_DEADLINE_HOURS = 24
 _MAX_IMAGE_PROMPT_CHARS = 3000
 
 
+def _sanitize_publish_error(message: str) -> str:
+    """Never return access tokens or full Graph URLs to the client."""
+    import re
+    msg = re.sub(r"access_token=[^&\s'\"]+", "access_token=[redacted]", message, flags=re.I)
+    msg = re.sub(r"https?://graph\.facebook\.com/[^\s'\"]+", "Facebook API", msg, flags=re.I)
+    msg = re.sub(
+        r"Client error '\d+ [^']+' for url '[^']*'\s*",
+        "",
+        msg,
+        flags=re.I,
+    )
+    msg = re.sub(r"\s*For more information check:.*$", "", msg, flags=re.I | re.S)
+    return msg.strip() or "Publishing failed. Please try again."
+
+
 def _api_public_base(request: Request | None = None) -> str:
     """Prefer configured API base URL; fall back to the incoming request host."""
     if settings.api_base_url:
@@ -71,6 +86,173 @@ async def _download_to_data_url(url: str) -> str:
         if not ctype.startswith("image/"):
             ctype = "image/png"
         return await _bytes_to_data_url(resp.content, ctype)
+
+
+# Instagram Graph API image rules:
+#   format JPEG only, aspect ratio between 4:5 (0.8) and 1.91:1, width 320–1440.
+_IG_MIN_ASPECT = 0.8
+_IG_MAX_ASPECT = 1.91
+_IG_MIN_WIDTH = 320
+_IG_MAX_WIDTH = 1440
+
+
+# Recommended feed sizes (match generate-image defaults) — used for soft warnings.
+_PLATFORM_IDEAL_SIZE: dict[str, tuple[int, int, str]] = {
+    "instagram":    (1080, 1080, "1:1 square"),
+    "tiktok":       (1080, 1920, "9:16 vertical"),
+    "facebook":     (1200, 630, "landscape ~1.91:1"),
+    "linkedin":     (1200, 627, "landscape ~1.91:1"),
+    "facebook_ads": (1200, 628, "landscape ~1.91:1"),
+    "google_ads":   (1200, 628, "landscape ~1.91:1"),
+}
+
+
+def _upload_size_warning(image_bytes: bytes, platform: str) -> str | None:
+    """Human-readable warning when an upload is outside platform-safe/ideal size."""
+    from PIL import Image as PILImage
+
+    try:
+        img = PILImage.open(io.BytesIO(image_bytes))
+        w, h = img.size
+    except Exception:
+        return None
+    if w < 1 or h < 1:
+        return "Uploaded image has invalid dimensions."
+
+    aspect = w / h
+    ideal = _PLATFORM_IDEAL_SIZE.get(platform)
+    ideal_label = ideal[2] if ideal else "the platform feed format"
+
+    if platform == "instagram":
+        if aspect < _IG_MIN_ASPECT or aspect > _IG_MAX_ASPECT:
+            return (
+                f"Image is {w}×{h} ({aspect:.2f}:1), outside Instagram’s allowed "
+                f"4:5–1.91:1 range. It will be center-cropped to fit before publishing. "
+                f"For best results, upload a {ideal_label} image (~1080×1080)."
+            )
+        if abs(aspect - 1.0) > 0.15:
+            return (
+                f"Image is {w}×{h} ({aspect:.2f}:1). Instagram works best with a "
+                f"{ideal_label} (~1080×1080). Publishing will still work, but edges may look cropped on feed."
+            )
+        if w < _IG_MIN_WIDTH:
+            return (
+                f"Image is only {w}px wide (minimum {_IG_MIN_WIDTH}px). "
+                f"It will be upscaled, which may reduce quality."
+            )
+        if w > _IG_MAX_WIDTH:
+            return (
+                f"Image is {w}px wide (Instagram max {_IG_MAX_WIDTH}px). "
+                f"It will be downscaled before publishing."
+            )
+        return None
+
+    if ideal:
+        iw, ih, label = ideal
+        ideal_aspect = iw / ih
+        if abs(aspect - ideal_aspect) / ideal_aspect > 0.2:
+            return (
+                f"Image is {w}×{h} ({aspect:.2f}:1). Recommended for {platform.replace('_', ' ')} "
+                f"is {label} (~{iw}×{ih}). Consider re-uploading a better-fitting image."
+            )
+    return None
+
+
+def _normalize_image_for_platform(image_bytes: bytes, platform: str) -> tuple[bytes, str]:
+    """Convert any uploaded/generated image into a Meta-safe JPEG.
+
+    Local uploads often fail Instagram publishing because they keep arbitrary
+    aspect ratios (e.g. ultra-wide banners) or non-JPEG formats. Generated
+    images already use platform sizes, so this is mainly for uploads — but we
+    also re-run it at publish time so existing bad uploads can be retried.
+    """
+    from PIL import Image as PILImage
+
+    img = PILImage.open(io.BytesIO(image_bytes))
+    if img.mode in ("RGBA", "LA", "P"):
+        rgba = img.convert("RGBA")
+        background = PILImage.new("RGB", rgba.size, (255, 255, 255))
+        background.paste(rgba, mask=rgba.split()[-1])
+        img = background
+    else:
+        img = img.convert("RGB")
+
+    w, h = img.size
+    if w < 1 or h < 1:
+        raise ValueError("Image has invalid dimensions.")
+
+    aspect = w / h
+    # Enforce Instagram's published aspect window for IG; for other platforms
+    # only convert to JPEG so Meta/LinkedIn can fetch a standard format.
+    if platform == "instagram":
+        if aspect < _IG_MIN_ASPECT:
+            new_h = max(1, int(w / _IG_MIN_ASPECT))
+            top = max(0, (h - new_h) // 2)
+            img = img.crop((0, top, w, top + new_h))
+        elif aspect > _IG_MAX_ASPECT:
+            new_w = max(1, int(h * _IG_MAX_ASPECT))
+            left = max(0, (w - new_w) // 2)
+            img = img.crop((left, 0, left + new_w, h))
+
+        if img.width > _IG_MAX_WIDTH:
+            ratio = _IG_MAX_WIDTH / img.width
+            img = img.resize((_IG_MAX_WIDTH, max(1, int(img.height * ratio))), PILImage.LANCZOS)
+        elif img.width < _IG_MIN_WIDTH:
+            ratio = _IG_MIN_WIDTH / img.width
+            img = img.resize((_IG_MIN_WIDTH, max(1, int(img.height * ratio))), PILImage.LANCZOS)
+
+    out = io.BytesIO()
+    img.save(out, format="JPEG", quality=92, optimize=True)
+    return out.getvalue(), "image/jpeg"
+
+
+async def _image_bytes_from_item(item: ContentItem) -> bytes | None:
+    """Decode a content item's stored image into raw bytes."""
+    if not item.image_url:
+        return None
+    if item.image_url.startswith("data:"):
+        _, b64data = item.image_url.split(",", 1)
+        return base64.b64decode(b64data)
+    async with httpx.AsyncClient(timeout=20) as http:
+        r = await http.get(item.image_url)
+        r.raise_for_status()
+        return r.content
+
+
+def _needs_instagram_normalize(image_bytes: bytes, data_url: str | None) -> bool:
+    """True when stored image would be rejected by Instagram Graph API."""
+    if not data_url or not data_url.startswith("data:image/jpeg"):
+        return True
+    try:
+        from PIL import Image as PILImage
+        img = PILImage.open(io.BytesIO(image_bytes))
+        w, h = img.size
+        if w < _IG_MIN_WIDTH or w > _IG_MAX_WIDTH:
+            return True
+        aspect = w / h if h else 0
+        return aspect < _IG_MIN_ASPECT or aspect > _IG_MAX_ASPECT
+    except Exception:
+        return True
+
+
+async def _ensure_publishable_image(item: ContentItem, db: AsyncSession) -> None:
+    """Normalize stored image for Instagram/Facebook pull-from-URL publishing."""
+    platform = item.platform.value if hasattr(item.platform, "value") else str(item.platform)
+    if platform not in ("instagram", "facebook", "tiktok"):
+        return
+    raw = await _image_bytes_from_item(item)
+    if not raw:
+        return
+    if platform == "instagram" and not _needs_instagram_normalize(raw, item.image_url):
+        return
+    try:
+        normalized, ctype = _normalize_image_for_platform(raw, platform)
+    except Exception as exc:
+        print(f"[OMMA] Image normalize skipped: {exc}")
+        return
+    item.image_url = await _bytes_to_data_url(normalized, ctype)
+    await db.commit()
+    print(f"[OMMA] Normalized image for {platform} publish (content_item={item.id})")
 
 
 # ─── Schemas ─────────────────────────────────────────────────────────────────
@@ -108,6 +290,11 @@ class ContentItemOut(BaseModel):
         if value and value.startswith("data:"):
             return f"/api/content/{self.id}/image"
         return value
+
+
+class UploadImageOut(ContentItemOut):
+    """Upload response — includes an optional size/aspect warning for the UI."""
+    warning: str | None = None
 
 
 class ApprovalQueueOut(BaseModel):
@@ -428,6 +615,10 @@ async def publish_content(
 
     if account:
         try:
+            # Uploaded images may be ultra-wide / PNG / WebP — Instagram rejects those.
+            # Normalize before Meta's servers fetch /api/content/{id}/image.
+            if platform in ("facebook", "instagram", "tiktok") and item.image_url:
+                await _ensure_publishable_image(item, db)
             prepared = await social_publishing_agent.prepare_post(item)
             # Instagram and TikTok require a public URL — base64 data URIs can't be
             # fetched by either platform's PULL_FROM_URL mechanism.
@@ -445,7 +636,7 @@ async def publish_content(
             post_id = await publish_to_platform(account, post)
             print(f"[OMMA] Published to {platform}, post_id={post_id}")
         except Exception as exc:
-            publish_error = str(exc)
+            publish_error = _sanitize_publish_error(str(exc))
             print(f"[OMMA] Publish error ({platform}): {exc}")
     else:
         publish_error = f"No connected {platform} account found for this brand."
@@ -803,7 +994,7 @@ async def generate_image(
     return {"image_url": public_url, "content_item_id": item_id}
 
 
-@router.post("/{item_id}/upload-image", response_model=ContentItemOut, status_code=status.HTTP_200_OK)
+@router.post("/{item_id}/upload-image", response_model=UploadImageOut, status_code=status.HTTP_200_OK)
 async def upload_image(
     item_id: int,
     file: UploadFile = File(...),
@@ -824,7 +1015,13 @@ async def upload_image(
     if len(data) > 8 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Image must be under 8 MB.")
 
-    ctype = file.content_type.split(";")[0].strip() or "image/png"
+    platform = item.platform.value if hasattr(item.platform, "value") else str(item.platform)
+    size_warning = _upload_size_warning(data, platform)
+    try:
+        data, ctype = _normalize_image_for_platform(data, platform)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not process uploaded image: {exc}") from exc
+
     item.image_url = await _bytes_to_data_url(data, ctype)
     await db.commit()
     await db.refresh(item)
@@ -833,14 +1030,18 @@ async def upload_image(
         "content_item_id": item_id,
         "content_type": ctype,
         "bytes": len(data),
+        "normalized_for": platform,
+        "size_warning": bool(size_warning),
     })
 
-    return ContentItemOut.model_validate(item)
+    out = UploadImageOut.model_validate(item)
+    out.warning = size_warning
+    return out
 
 
 # ─── Public image endpoint (for Instagram which requires a public URL) ────────
 
-@router.get("/{item_id}/image")
+@router.api_route("/{item_id}/image", methods=["GET", "HEAD"])
 async def get_content_image(
     item_id: int,
     db: AsyncSession = Depends(get_db),
@@ -861,7 +1062,14 @@ async def get_content_image(
             r.raise_for_status()
             image_bytes = r.content
             content_type = r.headers.get("content-type", "image/png").split(";")[0]
-    return Response(content=image_bytes, media_type=content_type)
+    return Response(
+        content=image_bytes,
+        media_type=content_type,
+        headers={
+            "Cache-Control": "public, max-age=300",
+            "Content-Length": str(len(image_bytes)),
+        },
+    )
 
 
 # ─── Internal helpers ─────────────────────────────────────────────────────────

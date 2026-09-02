@@ -3,10 +3,13 @@
 import { useEffect, useState } from "react";
 import { contentApi, normalizeContentImageUrl } from "@/lib/api";
 import { platformLabel } from "@/lib/utils";
+import { formatPublishError, getPlatformImageGuide } from "@/lib/platformImage";
 import { useAuth } from "@/context/AuthContext";
+import { ImageCropModal } from "@/components/chat/ImageCropModal";
 import {
   Copy, CheckCircle, XCircle, RefreshCw, Rocket,
-  Hash, ImageIcon, Bot, Check, Loader2, Sparkles, Pencil, X, Upload,
+  Hash, ImageIcon, Bot, Check, Loader2, Sparkles, Pencil, X, Upload, AlertTriangle,
+  Eye, EyeOff, Heart, MessageSquare, Share2, ThumbsUp, MoreHorizontal,
 } from "lucide-react";
 import type { ApprovalQueueItem, ApprovalStatus } from "@/types";
 
@@ -67,8 +70,13 @@ export function PostCard({ item, onAction, onItemUpdate, onRevise }: PostCardPro
   const [imageStage, setImageStage] = useState<string | null>(null);
   const [uploadLoading, setUploadLoading] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
+  const [uploadWarning, setUploadWarning] = useState<string | null>(null);
   const [editingPrompt, setEditingPrompt] = useState(false);
   const [promptDraft, setPromptDraft] = useState(ci.image_prompt ?? "");
+  const [showPreview, setShowPreview] = useState(false);
+  const [cropFile, setCropFile] = useState<File | null>(null);
+
+  const imageGuide = getPlatformImageGuide(ci.platform);
 
   // Keep local UI in sync when parent hydrates fresh server state (e.g. after tab nav)
   useEffect(() => {
@@ -144,6 +152,7 @@ export function PostCard({ item, onAction, onItemUpdate, onRevise }: PostCardPro
     setEditingPrompt(false);
     setImageLoading(true);
     setImageError(null);
+    setUploadWarning(null);
     setImageStage("Preparing prompt…");
     const stageTimer = window.setTimeout(() => setImageStage("Generating image…"), 2500);
     const stageTimer2 = window.setTimeout(() => setImageStage("Almost done — applying brand finish…"), 12000);
@@ -170,19 +179,32 @@ export function PostCard({ item, onAction, onItemUpdate, onRevise }: PostCardPro
 
   async function handleUploadImage(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
+    e.target.value = "";
     if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setImageError("Please choose an image file (JPG, PNG, WebP, etc.).");
+      return;
+    }
+    setImageError(null);
+    setUploadWarning(null);
+    setCropFile(file);
+  }
+
+  async function handleCroppedUpload(cropped: File) {
     setUploadLoading(true);
     setImageError(null);
+    setUploadWarning(null);
     try {
-      const res = await contentApi.uploadImage(ci.id, file);
+      const res = await contentApi.uploadImage(ci.id, cropped);
       const nextUrl = normalizeContentImageUrl(ci.id, res.image_url) ?? res.image_url;
       setImageUrl(nextUrl);
+      setUploadWarning(res.warning ?? null);
+      setCropFile(null);
       notifyUpdate({ image_url: nextUrl });
     } catch (e: unknown) {
       setImageError(e instanceof Error ? e.message : "Upload failed");
     } finally {
       setUploadLoading(false);
-      e.target.value = "";
     }
   }
 
@@ -191,13 +213,13 @@ export function PostCard({ item, onAction, onItemUpdate, onRevise }: PostCardPro
     try {
       const result = await contentApi.publish(ci.id);
       if (result?.warning) {
-        setError(`Publishing failed: ${result.warning}`);
+        setError(formatPublishError(result.warning));
       } else {
         setPublished(true);
         notifyUpdate({ published: true, status: "approved" });
       }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed");
+      setError(formatPublishError(e instanceof Error ? e.message : "Failed"));
     } finally { setLoading(false); }
   }
 
@@ -281,7 +303,7 @@ export function PostCard({ item, onAction, onItemUpdate, onRevise }: PostCardPro
                     setImageUrl(null);
                   }}
                 />
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {(ci.image_prompt || promptDraft) && (
                     <button
                       onClick={handleGenerateImage}
@@ -308,11 +330,18 @@ export function PostCard({ item, onAction, onItemUpdate, onRevise }: PostCardPro
                       disabled={uploadLoading || imageLoading}
                     />
                   </label>
+                  <span className="text-[10px] text-gray-500">{imageGuide.guide}</span>
                 </div>
                 {imageLoading && imageStage && (
                   <p className="text-xs text-violet-600 flex items-center gap-1.5">
                     <Loader2 className="h-3 w-3 animate-spin" /> {imageStage}
                   </p>
+                )}
+                {uploadWarning && (
+                  <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                    <AlertTriangle className="h-3.5 w-3.5 text-amber-600 mt-0.5 shrink-0" />
+                    <p className="text-xs text-amber-800 leading-relaxed">{uploadWarning}</p>
+                  </div>
                 )}
                 {imageError && (
                   <div className="flex items-start justify-between gap-2">
@@ -329,7 +358,7 @@ export function PostCard({ item, onAction, onItemUpdate, onRevise }: PostCardPro
               </div>
             ) : (
               <div className="space-y-2">
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {(ci.image_prompt || promptDraft) && (
                     <button
                       onClick={handleGenerateImage}
@@ -356,6 +385,7 @@ export function PostCard({ item, onAction, onItemUpdate, onRevise }: PostCardPro
                       disabled={uploadLoading || imageLoading}
                     />
                   </label>
+                  <span className="text-[10px] text-gray-500">{imageGuide.guide}</span>
                 </div>
                 {imageLoading && (
                   <div className="rounded-lg border border-dashed border-violet-200 bg-violet-50/60 px-3 py-6 text-center">
@@ -382,6 +412,121 @@ export function PostCard({ item, onAction, onItemUpdate, onRevise }: PostCardPro
             )}
           </div>
         )}
+
+        {showPreview && (
+          <div className="mt-4 border-t border-gray-100 pt-4 bg-gray-50/50 p-4 rounded-xl">
+            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Simulated Live Feed Preview</p>
+            {ci.platform === "instagram" ? (
+              <div className="bg-white border border-gray-200 rounded-xl overflow-hidden max-w-sm mx-auto shadow-sm">
+                {/* IG Header */}
+                <div className="flex items-center justify-between p-3 border-b border-gray-50">
+                  <div className="flex items-center gap-2">
+                    <div className="h-8 w-8 rounded-full bg-gradient-to-tr from-yellow-500 via-red-500 to-purple-600 p-[1.5px]">
+                      <div className="h-full w-full rounded-full bg-white flex items-center justify-center text-[10px] font-bold text-gray-700">OP</div>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-gray-900">opulanz_marketing</p>
+                      <p className="text-[9px] text-gray-500">Sponsored</p>
+                    </div>
+                  </div>
+                  <MoreHorizontal className="h-4 w-4 text-gray-400" />
+                </div>
+                {/* IG Image */}
+                <div className="aspect-square bg-gray-100 flex items-center justify-center overflow-hidden">
+                  {imageUrl ? (
+                    <img src={imageUrl} alt="IG Preview" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="text-center p-6 text-gray-400">
+                      <ImageIcon className="h-8 w-8 mx-auto mb-2 opacity-55" />
+                      <p className="text-[10px]">No image generated yet</p>
+                    </div>
+                  )}
+                </div>
+                {/* IG Actions */}
+                <div className="p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <Heart className="h-5 w-5 text-gray-700 hover:text-red-500 cursor-pointer" />
+                      <MessageSquare className="h-5 w-5 text-gray-700" />
+                      <Share2 className="h-5 w-5 text-gray-700" />
+                    </div>
+                  </div>
+                  {/* IG Caption */}
+                  <div className="text-xs text-gray-800 space-y-1">
+                    <p>
+                      <span className="font-semibold mr-1.5 text-gray-900">opulanz_marketing</span>
+                      {ci.text_body}
+                    </p>
+                    {ci.hashtags && (
+                      <p className="text-indigo-600 font-medium">{ci.hashtags}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : ci.platform === "linkedin" ? (
+              <div className="bg-white border border-gray-200 rounded-xl p-4 max-w-md mx-auto shadow-sm space-y-3">
+                {/* LI Header */}
+                <div className="flex items-start justify-between">
+                  <div className="flex gap-2">
+                    <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center font-bold text-blue-700 text-sm">OP</div>
+                    <div>
+                      <div className="flex items-center gap-1">
+                        <p className="text-xs font-semibold text-gray-900">Opulanz Business Hub</p>
+                        <span className="text-[10px] text-gray-400 font-medium">• 1st</span>
+                      </div>
+                      <p className="text-[9px] text-gray-500">AI Marketing Director at Opulanz</p>
+                      <p className="text-[9px] text-gray-400">Just now • Edited • 🌐</p>
+                    </div>
+                  </div>
+                  <MoreHorizontal className="h-4 w-4 text-gray-400" />
+                </div>
+                {/* LI Body */}
+                <div className="text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
+                  {ci.text_body}
+                  {ci.hashtags && (
+                    <p className="mt-2 text-indigo-600 font-medium">{ci.hashtags}</p>
+                  )}
+                </div>
+                {/* LI Media */}
+                {imageUrl && (
+                  <div className="rounded-lg overflow-hidden border border-gray-200 max-h-72 bg-gray-50">
+                    <img src={imageUrl} alt="LinkedIn Preview" className="w-full h-full object-cover" />
+                  </div>
+                )}
+                {/* LI Actions */}
+                <div className="border-t border-gray-100 pt-2 flex items-center justify-around text-gray-500 text-[11px] font-medium">
+                  <button className="flex items-center gap-1.5 hover:bg-gray-50 p-1.5 rounded transition-colors">
+                    <ThumbsUp className="h-4 w-4" /> Like
+                  </button>
+                  <button className="flex items-center gap-1.5 hover:bg-gray-50 p-1.5 rounded transition-colors">
+                    <MessageSquare className="h-4 w-4" /> Comment
+                  </button>
+                  <button className="flex items-center gap-1.5 hover:bg-gray-50 p-1.5 rounded transition-colors">
+                    <Share2 className="h-4 w-4" /> Share
+                  </button>
+                </div>
+              </div>
+            ) : (
+              // Default generic social mock (for tiktok, facebook etc.)
+              <div className="bg-white border border-gray-200 rounded-xl p-4 max-w-sm mx-auto shadow-sm space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="h-8 w-8 rounded-full bg-indigo-100 flex items-center justify-center font-bold text-indigo-600 text-xs">OP</div>
+                  <div>
+                    <p className="text-xs font-semibold text-gray-900">opulanz_brand</p>
+                    <p className="text-[9px] text-gray-400 capitalize">{ci.platform} Post Preview</p>
+                  </div>
+                </div>
+                <div className="text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">{ci.text_body}</div>
+                {ci.hashtags && <p className="text-xs text-indigo-600 font-medium">{ci.hashtags}</p>}
+                {imageUrl && (
+                  <div className="rounded-lg overflow-hidden border border-gray-200">
+                    <img src={imageUrl} alt="Preview" className="w-full max-h-60 object-cover" />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Scores + copy */}
@@ -402,13 +547,25 @@ export function PostCard({ item, onAction, onItemUpdate, onRevise }: PostCardPro
             </div>
           )}
         </div>
-        <button
-          onClick={copyText}
-          className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800 transition-colors px-2 py-1 rounded hover:bg-gray-100"
-        >
-          {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-          {copied ? "Copied!" : "Copy"}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowPreview(!showPreview)}
+            className={`flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded transition-colors ${
+              showPreview ? "text-indigo-600 bg-indigo-50 border border-indigo-200" : "text-gray-500 hover:text-gray-800 hover:bg-gray-100"
+            }`}
+            title="Toggle Live Social Media Feed Preview"
+          >
+            {showPreview ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+            {showPreview ? "Hide Preview" : "Preview"}
+          </button>
+          <button
+            onClick={copyText}
+            className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800 transition-colors px-2 py-1 rounded hover:bg-gray-100"
+          >
+            {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+            {copied ? "Copied!" : "Copy"}
+          </button>
+        </div>
       </div>
 
       {/* Comment input for reject/revise/approve modes */}
@@ -510,6 +667,17 @@ export function PostCard({ item, onAction, onItemUpdate, onRevise }: PostCardPro
             <Rocket className="h-3.5 w-3.5" /> Dispatched to publishing queue.
           </p>
         </div>
+      )}
+
+      {cropFile && (
+        <ImageCropModal
+          file={cropFile}
+          platform={ci.platform}
+          open={Boolean(cropFile)}
+          busy={uploadLoading}
+          onCancel={() => { if (!uploadLoading) setCropFile(null); }}
+          onConfirm={handleCroppedUpload}
+        />
       )}
     </div>
   );
