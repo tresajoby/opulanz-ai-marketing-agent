@@ -12,7 +12,7 @@ import type {
   SocialAccount,
 } from "@/types";
 
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? "https://api-production-69d9.up.railway.app";
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? "https://omma-prod-api.orangetree-ce90bec0.francecentral.azurecontainerapps.io";
 
 async function request<T>(
   path: string,
